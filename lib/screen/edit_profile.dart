@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mie_project/services/db_helper.dart';
@@ -15,6 +17,7 @@ class EditProfilePage extends StatefulWidget {
 
 class _EditProfilePageState extends State<EditProfilePage> {
   File? _imageFile;
+  Uint8List? _imageBytes; // for web
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _nameController = TextEditingController();
@@ -25,9 +28,16 @@ class _EditProfilePageState extends State<EditProfilePage> {
     final picker = ImagePicker();
     final XFile? pickedFile = await picker.pickImage(source: ImageSource.gallery);
     if (pickedFile != null) {
-      setState(() {
-        _imageFile = File(pickedFile.path);
-      });
+      if (kIsWeb) {
+        final bytes = await pickedFile.readAsBytes();
+        setState(() {
+          _imageBytes = bytes;
+        });
+      } else {
+        setState(() {
+          _imageFile = File(pickedFile.path);
+        });
+      }
     }
   }
 
@@ -53,8 +63,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
     if (_emailController.text.isNotEmpty) {
       updatedData['email'] = _emailController.text;
     }
-    if (_imageFile != null) {
-      updatedData['avatar_image'] = _imageFile!.path;
+    if (kIsWeb ? _imageBytes != null : _imageFile != null) {
+      updatedData['avatar_image'] = _imageFile?.path ?? '';
     }
 
     if (updatedData.isEmpty) {
@@ -136,10 +146,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
                                   child: CircleAvatar(
                                     radius: 60,
                                     backgroundColor: Colors.grey[200],
-                                    backgroundImage: _imageFile != null
-                                        ? FileImage(_imageFile!)
-                                        : null,
-                                    child: _imageFile == null
+                                    backgroundImage: kIsWeb
+                                        ? (_imageBytes != null
+                                            ? MemoryImage(_imageBytes!) as ImageProvider
+                                            : null)
+                                        : (_imageFile != null
+                                            ? FileImage(_imageFile!) as ImageProvider
+                                            : null),
+                                    child: (kIsWeb ? _imageBytes == null : _imageFile == null)
                                         ? Icon(Icons.person,
                                             size: 60, color: Colors.grey[400])
                                         : null,

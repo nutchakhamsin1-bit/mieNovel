@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:mie_project/services/image_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:convex_bottom_bar/convex_bottom_bar.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -197,8 +198,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                   child:
                                       novel.coverImage != null &&
                                           novel.coverImage!.isNotEmpty
-                                      ? Image.file(
-                                          File(novel.coverImage!),
+                                      ? buildCoverImage(
+                                          novel.coverImage!,
                                           fit: BoxFit.cover,
                                           errorBuilder:
                                               (context, error, stackTrace) {
@@ -690,8 +691,8 @@ class _HomeScreenState extends State<HomeScreen> {
               child: novel.coverImage != null && novel.coverImage!.isNotEmpty
                   ? ClipRRect(
                       borderRadius: BorderRadius.circular(4),
-                      child: Image.file(
-                        File(novel.coverImage!),
+                      child: buildCoverImage(
+                        novel.coverImage!,
                         fit: BoxFit.cover,
                         errorBuilder: (context, error, stackTrace) {
                           return const Icon(Icons.broken_image);

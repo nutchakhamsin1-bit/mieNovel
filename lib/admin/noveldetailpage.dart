@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:mie_project/services/image_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:mie_project/admin/adminNovelAction.dart';
@@ -294,8 +295,8 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: (coverImagePath != null && coverImagePath.isNotEmpty)
-                      ? Image.file(
-                          File(coverImagePath),
+                      ? buildCoverImage(
+                          coverImagePath,
                           fit: BoxFit.cover,
                           errorBuilder: (context, error, stackTrace) {
                             return const Center(

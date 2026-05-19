@@ -1,7 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:mie_project/screen/edit_novel.dart';
 import 'package:mie_project/screen/new_chapter.dart';
 import 'package:mie_project/screen/write_novel.dart';
-import 'package:mie_project/services/db_helper.dart'; 
+import 'package:mie_project/services/db_helper.dart';
+import 'package:mie_project/services/image_provider_helper.dart';
 import 'dart:io';
 
 class ManageNovelWriter extends StatefulWidget {
@@ -289,9 +292,11 @@ class _ManageNovelWriterState extends State<ManageNovelWriter> {
     final int chapterCount = _chapters.length;
 
     final ImageProvider imageProvider =
-        coverImagePath.isNotEmpty && File(coverImagePath).existsSync()
-        ? FileImage(File(coverImagePath)) as ImageProvider
+        coverImagePath.isNotEmpty && (kIsWeb || File(coverImagePath).existsSync())
+        ? buildImageProvider(coverImagePath) as ImageProvider
         : const AssetImage('assets/placeholder.png');
+
+    final bool hasCover = coverImagePath.isNotEmpty && (kIsWeb || File(coverImagePath).existsSync());
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -315,11 +320,22 @@ class _ManageNovelWriterState extends State<ManageNovelWriter> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(
-              Icons.delete_forever,
-              color: Colors.white,
-            ),
-            onPressed: _confirmAndDeleteNovel, 
+            icon: const Icon(Icons.edit, color: Colors.white),
+            tooltip: 'แก้ไขข้อมูลนิยาย',
+            onPressed: () async {
+              final updated = await Navigator.push<bool>(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => EditNovelScreen(novelId: widget.novelId),
+                ),
+              );
+              if (updated == true) _loadNovelAndChapters();
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_forever, color: Colors.white),
+            tooltip: 'ลบนิยาย',
+            onPressed: _confirmAndDeleteNovel,
           ),
         ],
       ),
@@ -349,9 +365,7 @@ class _ManageNovelWriterState extends State<ManageNovelWriter> {
                       fit: BoxFit.cover,
                     ),
                   ),
-                  child:
-                      coverImagePath.isEmpty ||
-                              !File(coverImagePath).existsSync()
+                  child: !hasCover
                           ? const Icon(
                               Icons.menu_book,
                               color: Colors.white,
@@ -415,28 +429,76 @@ class _ManageNovelWriterState extends State<ManageNovelWriter> {
                 final chapter = _chapters[index];
                 final bool isPublished = chapter['is_published'] == 1;
 
-                return ListTile(
-                  title: Text(
-                    '#${chapter['chapter_number']} ${chapter['title']}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: isPublished ? Colors.black87 : Colors.grey,
-                    ),
-                  ),
-                  subtitle: isPublished
-                      ? null
-                      : const Text(
-                          'ฉบับร่าง (Draft)',
-                          style: TextStyle(color: Colors.red),
+                return Dismissible(
+                  key: ValueKey(chapter['chapter_id']),
+                  direction: DismissDirection.endToStart,
+                  confirmDismiss: (_) async {
+                    return await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('ลบบท'),
+                        content: Text(
+                          'ต้องการลบ "${chapter['title']}" หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้',
                         ),
-                  trailing: const Icon(
-                    Icons.edit,
-                    size: 18,
-                    color: Color(0xFF26A69A),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: const Text('ยกเลิก'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, true),
+                            style: TextButton.styleFrom(foregroundColor: Colors.red),
+                            child: const Text('ลบ'),
+                          ),
+                        ],
+                      ),
+                    ) ?? false;
+                  },
+                  onDismissed: (_) async {
+                    try {
+                      await DBHelper.deleteChapter(chapterId: chapter['chapter_id']);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('🗑️ ลบ "${chapter['title']}" สำเร็จ'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                        _loadNovelAndChapters();
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('❌ ลบบทล้มเหลว: $e'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    }
+                  },
+                  background: Container(
+                    color: Colors.red,
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: const Icon(Icons.delete, color: Colors.white, size: 28),
                   ),
-                  onTap: () => _navigateToChapter(chapter),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-                  dense: true,
+                  child: ListTile(
+                    title: Text(
+                      '#${chapter['chapter_number']} ${chapter['title']}',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: isPublished ? Colors.black87 : Colors.grey,
+                      ),
+                    ),
+                    subtitle: isPublished
+                        ? null
+                        : const Text('ฉบับร่าง (Draft)', style: TextStyle(color: Colors.red)),
+                    trailing: const Icon(Icons.edit, size: 18, color: Color(0xFF26A69A)),
+                    onTap: () => _navigateToChapter(chapter),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                    dense: true,
+                  ),
                 );
               },
             ),

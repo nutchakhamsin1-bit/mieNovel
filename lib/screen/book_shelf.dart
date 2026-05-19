@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'dart:io';
+import 'package:mie_project/services/image_helper.dart';
 import 'package:mie_project/screen/show_chapter.dart';
 import 'package:mie_project/services/db_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -21,252 +21,331 @@ class _BookShelfScreenState extends State<BookShelfScreen> {
     _userIdFuture = _loadUserId();
   }
 
-  // 1. ฟังก์ชันสำหรับดึง user ID จาก SharedPreferences และเริ่มโหลด Favorites
   Future<int> _loadUserId() async {
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getInt('user_id') ?? 0;
-    
-    // ⭐ ใช้ setState เพื่ออัปเดต Future ในกรณีที่โหลด userId สำเร็จ/ไม่สำเร็จ
     if (mounted) {
       setState(() {
-        if (userId > 0) {
-          // 🛑 ต้องมั่นใจว่า DBHelper.getFavoriteNovels ดึง 'is_banned' กลับมาด้วย
-          _favoritesFuture = DBHelper.getFavoriteNovels(userId);
-        } else {
-          _favoritesFuture = Future.value([]);
-        }
+        _favoritesFuture = userId > 0
+            ? DBHelper.getFavoriteNovels(userId)
+            : Future.value([]);
       });
     }
     return userId;
   }
 
-  // 💡 ฟังก์ชันที่ใช้ในการ Refresh
-  Future<void> _handleRefresh() async {
-    // โหลด User ID ใหม่ (ซึ่งจะเรียก _favoritesFuture ใหม่ด้วย)
-    await _loadUserId();
-  }
-
+  Future<void> _handleRefresh() async => await _loadUserId();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF4F6F9),
       appBar: AppBar(
-        title: const Text('หนังสือโปรด', style: TextStyle(color: Colors.white)),
+        title: const Text(
+          'ชั้นหนังสือของฉัน',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+        ),
         backgroundColor: const Color(0xFF26A69A),
+        elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(4),
+          child: Container(
+            height: 4,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF26A69A), Color(0xFF80CBC4)],
+              ),
+            ),
+          ),
+        ),
       ),
-      body: Container(
-        color: const Color(0xFFFFFFFF),
-        // FutureBuilder ตัวแรก: รอ user ID
-        child: FutureBuilder<int>(
-          future: _userIdFuture,
-          builder: (context, userIdSnapshot) {
-            
-            if (userIdSnapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            
-            final currentUserId = userIdSnapshot.data ?? 0;
+      body: FutureBuilder<int>(
+        future: _userIdFuture,
+        builder: (context, userIdSnapshot) {
+          if (userIdSnapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator(color: Color(0xFF26A69A)));
+          }
 
-            // ตรวจสอบว่ามี user ID หรือไม่
-            if (currentUserId == 0) {
-              return const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(32.0),
-                  child: Text(
-                    'กรุณาเข้าสู่ระบบเพื่อดูนิยายที่คุณชื่นชอบ', 
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16, color: Colors.red),
-                  ),
-                ),
-              );
-            }
+          final currentUserId = userIdSnapshot.data ?? 0;
 
-            // FutureBuilder ตัวที่สอง: รอผลลัพธ์นิยายโปรด
-            return FutureBuilder<List<Map<String, dynamic>>>(
-              future: _favoritesFuture, 
-              builder: (context, snapshot) {
-                
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
+          if (currentUserId == 0) {
+            return _buildEmptyState(
+              icon: Icons.person_outline,
+              title: 'ยังไม่ได้เข้าสู่ระบบ',
+              subtitle: 'กรุณาเข้าสู่ระบบเพื่อดูนิยายที่คุณชื่นชอบ',
+            );
+          }
 
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Text('เกิดข้อผิดพลาดในการโหลดนิยาย: ${snapshot.error}', style: const TextStyle(color: Colors.red)),
-                  );
-                }
+          return FutureBuilder<List<Map<String, dynamic>>>(
+            future: _favoritesFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator(color: Color(0xFF26A69A)));
+              }
 
-                final favorites = snapshot.data ?? [];
-                final bool hasFavorites = favorites.isNotEmpty;
+              if (snapshot.hasError) {
+                return _buildEmptyState(
+                  icon: Icons.error_outline,
+                  title: 'เกิดข้อผิดพลาด',
+                  subtitle: 'ไม่สามารถโหลดข้อมูลได้ ลองอีกครั้ง',
+                  isError: true,
+                );
+              }
 
-                if (hasFavorites) {
-                  // มีข้อมูลนิยายโปรด -> แสดงผลใน GridView
-                  return RefreshIndicator(
-                    onRefresh: _handleRefresh, // 💡 ใช้ _handleRefresh
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: GridView.builder(
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 3, 
-                          crossAxisSpacing: 10,
-                          mainAxisSpacing: 10,
-                          childAspectRatio: 0.6,
+              final favorites = snapshot.data ?? [];
+
+              if (favorites.isEmpty) {
+                return _buildEmptyState(
+                  icon: Icons.bookmarks_outlined,
+                  title: 'ชั้นหนังสือว่างเปล่า',
+                  subtitle: 'ค้นหานิยายและกดบันทึกเพื่อเพิ่มที่นี่',
+                );
+              }
+
+              return RefreshIndicator(
+                onRefresh: _handleRefresh,
+                color: const Color(0xFF26A69A),
+                child: CustomScrollView(
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF26A69A).withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.auto_stories, size: 16, color: Color(0xFF26A69A)),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '${favorites.length} เรื่อง',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF26A69A),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                        itemCount: favorites.length,
-                        itemBuilder: (context, index) {
-                          final novel = favorites[index];
-                          
-                          // ⭐ ดึงสถานะการแบน: 1 คือถูกแบน, 0 คือไม่ถูกแบน
-                          final isBanned = (novel['is_banned'] == 1); 
-
-                          return _NovelCoverItem(
-                            novelId: novel['novel_id'] as int,
-                            title: novel['title'] as String? ?? 'ไม่มีชื่อ',
-                            coverImage: novel['cover_image'] as String?,
-                            isBanned: isBanned, // ⭐ ส่งสถานะการแบนไปด้วย
-                          );
-                        },
                       ),
                     ),
-                  );
-                } else {
-                  // ไม่มีข้อมูลนิยายโปรด -> แสดงข้อความแจ้งเตือน
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.favorite_border, size: 64, color: Colors.grey[400]),
-                        const SizedBox(height: 24),
-                        Text(
-                          'ยังไม่มีนิยายโปรด',
-                          style: TextStyle(
-                            fontSize: 18,
-                            color: Colors.grey[600],
-                            fontWeight: FontWeight.w500,
-                          ),
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                      sliver: SliverGrid(
+                        delegate: SliverChildBuilderDelegate(
+                          (context, index) {
+                            final novel = favorites[index];
+                            final isBanned = novel['is_banned'] == 1;
+                            return _NovelCoverItem(
+                              novelId: novel['novel_id'] as int,
+                              title: novel['title'] as String? ?? 'ไม่มีชื่อ',
+                              coverImage: novel['cover_image'] as String?,
+                              isBanned: isBanned,
+                            );
+                          },
+                          childCount: favorites.length,
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'ลองเพิ่มนิยายลงในชั้นหนังสือของคุณสิ',
-                          style: TextStyle(color: Colors.grey[500]),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 4,
+                          crossAxisSpacing: 10,
+                          mainAxisSpacing: 14,
+                          childAspectRatio: 0.58,
                         ),
-                        const SizedBox(height: 32),
-                      ],
+                      ),
                     ),
-                  );
-                }
-              },
-            );
-          },
-        ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildEmptyState({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    bool isError = false,
+  }) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: isError
+                  ? Colors.red.shade50
+                  : const Color(0xFF26A69A).withOpacity(0.08),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              size: 56,
+              color: isError ? Colors.red.shade300 : const Color(0xFF26A69A).withOpacity(0.5),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey[700],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+          ),
+        ],
       ),
     );
   }
 }
 
-// ----------------------------------------------------------------------
-// ⭐ Widget สำหรับแสดงปกนิยายใน Grid (ปรับปรุง)
-// ----------------------------------------------------------------------
+// ─────────────────────────── Novel Cover Item ───────────────────────────
 class _NovelCoverItem extends StatelessWidget {
   final int novelId;
   final String title;
   final String? coverImage;
-  final bool isBanned; // ⭐ เพิ่มสถานะการแบน
+  final bool isBanned;
 
   const _NovelCoverItem({
     required this.novelId,
     required this.title,
     this.coverImage,
-    this.isBanned = false, // ⭐ ค่าเริ่มต้นเป็น false
+    this.isBanned = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () { 
-        // 💡 นำทางไปหน้าแสดงรายละเอียดนิยาย
-        Navigator.push(context, MaterialPageRoute(builder: (context) => ChapterListScreen(
-          novelId: novelId,
-          novelTitle: title, 
-          // ⭐ ต้องเพิ่ม isBanned เป็นพารามิเตอร์ของ ChapterListScreen ด้วย
-          isBanned: isBanned, 
-        )));
-      },
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChapterListScreen(
+            novelId: novelId,
+            novelTitle: title,
+            isBanned: isBanned,
+          ),
+        ),
+      ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ส่วนปกนิยาย
+          // ── Cover ──
           Expanded(
             child: Container(
               decoration: BoxDecoration(
-                color: isBanned ? Colors.grey[400] : Colors.grey[200], // 💡 เปลี่ยนสีพื้นหลังถ้าถูกแบน
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: isBanned ? Colors.red.shade600 : Colors.grey.shade300) // 💡 ขอบสีแดงถ้าถูกแบน
+                borderRadius: BorderRadius.circular(10),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.15),
+                    blurRadius: 6,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
               ),
-              child: Stack( // ⭐ ใช้ Stack เพื่อซ้อนสถานะแบนบนปก
-                fit: StackFit.expand,
-                children: [
-                  // 1. รูปภาพปก
-                  coverImage != null && coverImage!.isNotEmpty
-                      ? ClipRRect( 
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.file(
-                            File(coverImage!),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    // cover image
+                    coverImage != null && coverImage!.isNotEmpty
+                        ? buildCoverImage(
+                            coverImage!,
                             fit: BoxFit.cover,
-                            color: isBanned ? Colors.black54 : null, // 💡 ทำให้ภาพมืดลงถ้าถูกแบน
+                            color: isBanned ? Colors.black54 : null,
                             colorBlendMode: isBanned ? BlendMode.darken : null,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Center(
-                                child: Icon(
-                                  Icons.broken_image, 
-                                  size: 30, 
-                                  color: isBanned ? Colors.red.shade100 : Colors.red[300]
-                                ),
-                              );
-                            },
-                          ),
-                        )
-                      : Center(child: Icon(Icons.menu_book, size: 30, color: Colors.grey[500])),
-                  
-                  // 2. ป้ายเตือนการแบน
-                  if (isBanned)
-                    Center(
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.red.withOpacity(0.8),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: const Text(
-                          'ถูกแบน',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
+                            errorBuilder: (_, __, ___) => _placeholderCover(),
+                          )
+                        : _placeholderCover(),
+
+                    // gradient overlay at bottom for title legibility
+                    if (!isBanned)
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        height: 36,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [
+                                Colors.black.withOpacity(0.45),
+                                Colors.transparent,
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                ],
+
+                    // banned badge
+                    if (isBanned)
+                      Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade700,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'ถูกแบน',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 4),
-          // ชื่อนิยาย
+
+          const SizedBox(height: 6),
+
+          // ── Title ──
           Text(
             title,
-            textAlign: TextAlign.center,
-            maxLines: 1,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            // 💡 เปลี่ยนสีชื่อเรื่องถ้าถูกแบน
             style: TextStyle(
-              fontSize: 13, 
-              color: isBanned ? Colors.red.shade700 : Colors.black87,
-              fontWeight: isBanned ? FontWeight.bold : FontWeight.normal
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              height: 1.3,
+              color: isBanned ? Colors.red.shade700 : const Color(0xFF2D3748),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _placeholderCover() {
+    return Container(
+      color: const Color(0xFFE8F5E9),
+      child: const Center(
+        child: Icon(Icons.menu_book_rounded, size: 28, color: Color(0xFF80CBC4)),
       ),
     );
   }

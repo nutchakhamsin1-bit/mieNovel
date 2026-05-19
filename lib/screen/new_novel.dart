@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'dart:io' show File;
+import 'package:mie_project/services/image_helper.dart';
 import 'package:mie_project/services/db_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'new_chapter.dart';
@@ -267,8 +267,8 @@ class _NewNovelScreenState extends State<NewNovelScreen> {
                                       size: 100,
                                       color: Colors.red,
                                     ))
-                            : Image.file(
-                                File(_imagePath!),
+                            : buildCoverImage(
+                                _imagePath!,
                                 height: 180,
                                 width: 180,
                                 fit: BoxFit.cover,

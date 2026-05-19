@@ -1,10 +1,12 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mie_project/screen/NotificationPage.dart';
 import 'package:mie_project/screen/manage_novel_writer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mie_project/screen/new_novel.dart';
 import 'package:mie_project/services/db_helper.dart';
+import 'package:mie_project/services/image_provider_helper.dart';
 
 class WriteScreen extends StatefulWidget {
   const WriteScreen({super.key});
@@ -277,11 +279,15 @@ class _WriteScreenState extends State<WriteScreen> {
     
     ImageProvider imageProvider;
     if (imagePath.isNotEmpty) {
-      final file = File(imagePath);
-      if (file.existsSync()) {
-        imageProvider = FileImage(file);
+      if (!kIsWeb) {
+        final file = File(imagePath);
+        if (file.existsSync()) {
+          imageProvider = buildImageProvider(imagePath);
+        } else {
+          imageProvider = const AssetImage('assets/images/logo.png');
+        }
       } else {
-        imageProvider = const AssetImage('assets/images/logo.png');
+        imageProvider = buildImageProvider(imagePath);
       }
     } else {
       imageProvider = const AssetImage('assets/images/logo.png');

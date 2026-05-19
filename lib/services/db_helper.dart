@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle, ByteData;
 import 'package:path_provider/path_provider.dart';
 
@@ -18,11 +19,16 @@ class DBHelper {
   // ---------------------- INITIALIZE DATABASE ----------------------
   static Future<Database> initDb() async {
     if (_db != null) return _db!;
-    String path = join(await getDatabasesPath(), 'novel_app.db');
+    String path;
+    if (kIsWeb) {
+      path = 'novel_app.db';
+    } else {
+      path = join(await getDatabasesPath(), 'novel_app.db');
+    }
 
     _db = await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -191,6 +197,15 @@ class DBHelper {
         ''');
         await _insertInitialDataIfEmpty(db);
       },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        // Re-seed missing data when upgrading from an older DB version
+        print('🔄 DB upgrade from v$oldVersion to v$newVersion — checking seed data...');
+        await _insertInitialDataIfEmpty(db);
+      },
+      onOpen: (db) async {
+        // Ensure data is seeded even if onCreate already ran with broken SQL
+        await _insertInitialDataIfEmpty(db);
+      },
     );
 
     return _db!;
@@ -201,6 +216,10 @@ class DBHelper {
     String assetPath,
     String fileName,
   ) async {
+    // On web, just return the asset path directly
+    if (kIsWeb) {
+      return assetPath;
+    }
     try {
       // 1. อ่านข้อมูลไบนารี (ByteData) จาก Asset
       final ByteData data = await rootBundle.load(assetPath);
@@ -267,37 +286,66 @@ class DBHelper {
 
     if (users.isEmpty) {
       print('✅ Inserting initial data for all tables...');
+      try {
+        // 1. INSERT ข้อมูลพื้นฐานที่ไม่พึ่งพาใครก่อน
+        await db.execute(kInsertUsers);
+        await db.execute(kInsertAdmins);
+        await db.execute(kInsertCategories);
 
-      // 1. INSERT ข้อมูลพื้นฐานที่ไม่พึ่งพาใครก่อน
-      await db.execute(kInsertUsers);
-      await db.execute(kInsertAdmins);
-      await db.execute(kInsertCategories);
+        // 2. คัดลอกรูปภาพ Asset ไปเป็น File และเก็บพาธจริง
+        print('🔄 Copying novel cover assets to document directory...');
+        List<String> realFilePaths = [];
+        for (int i = 0; i < kNovelAssetPaths.length; i++) {
+          final String assetPath = kNovelAssetPaths[i];
+          final String fileName = assetPath.split('/').last;
+          final String filePath = await copyAssetToFile(assetPath, fileName);
+          realFilePaths.add(filePath);
+        }
+        print('✅ All novel covers copied successfully.');
 
-      // 2. คัดลอกรูปภาพ Asset ไปเป็น File และเก็บพาธจริง
-      print('🔄 Copying novel cover assets to document directory...');
-      List<String> realFilePaths = [];
-      // 💡 ต้องแน่ใจว่า kNovelAssetPaths ถูก import และใช้งานได้
-      for (int i = 0; i < kNovelAssetPaths.length; i++) {
-        final String assetPath = kNovelAssetPaths[i];
-        final String fileName = assetPath.split('/').last;
+        // 3. INSERT ข้อมูล Novels โดยใช้พาธไฟล์จริงที่เพิ่งคัดลอกมา
+        await _insertNovelsWithFilePaths(db, realFilePaths);
 
-        // ต้องมั่นใจว่า copyAssetToFile ถูกกำหนดให้เป็น static แล้ว
-        final String filePath = await copyAssetToFile(assetPath, fileName);
-        realFilePaths.add(filePath);
+        // 4. INSERT ข้อมูลที่พึ่งพา Novel ID (และ User ID)
+        await db.execute(kInsertChapters);
+        await db.execute(kInsertComments);
+        await db.execute(kInsertFavorites);
+
+        print('✅ Initial data inserted successfully.');
+      } catch (e) {
+        print('❌ Error inserting initial data: $e');
       }
-      print('✅ All novel covers copied successfully.');
-
-      // 3. INSERT ข้อมูล Novels โดยใช้พาธไฟล์จริงที่เพิ่งคัดลอกมา
-      await _insertNovelsWithFilePaths(db, realFilePaths);
-
-      // 4. INSERT ข้อมูลที่พึ่งพา Novel ID (และ User ID)
-      await db.execute(kInsertChapters);
-      await db.execute(kInsertComments);
-      await db.execute(kInsertFavorites);
-
-      print('✅ Initial data inserted successfully.');
     } else {
-      print('ℹ️ Users already exist — skipping data insertion.');
+      // Users exist — check if Novels are also seeded (stale DB recovery)
+      var novels = await db.query('Novels', limit: 1);
+      if (novels.isEmpty) {
+        print('⚠️ Users exist but Novels table is empty — re-seeding novels, chapters, comments, favorites...');
+        try {
+          // Categories may also be missing
+          var categories = await db.query('Categories', limit: 1);
+          if (categories.isEmpty) {
+            await db.execute(kInsertCategories);
+          }
+
+          List<String> realFilePaths = [];
+          for (int i = 0; i < kNovelAssetPaths.length; i++) {
+            final String assetPath = kNovelAssetPaths[i];
+            final String fileName = assetPath.split('/').last;
+            final String filePath = await copyAssetToFile(assetPath, fileName);
+            realFilePaths.add(filePath);
+          }
+
+          await _insertNovelsWithFilePaths(db, realFilePaths);
+          await db.execute(kInsertChapters);
+          await db.execute(kInsertComments);
+          await db.execute(kInsertFavorites);
+          print('✅ Novel data re-seeded successfully.');
+        } catch (e) {
+          print('❌ Error re-seeding novel data: $e');
+        }
+      } else {
+        print('ℹ️ Users already exist — skipping data insertion.');
+      }
     }
   }
 
@@ -728,6 +776,42 @@ class DBHelper {
 
     print('🗑️ Deleted Novel ID: $novelId, Rows affected: $rowsAffected');
     return rowsAffected; // คืนค่าจำนวนแถวที่ถูกลบไป (ของตาราง Novels)
+  }
+
+  // ✅ อัปเดตข้อมูลนิยาย (title, description, categories, age_limit, cover)
+  static Future<int> updateNovel({
+    required int novelId,
+    required String title,
+    required String description,
+    required String writerName,
+    required String ageLimit,
+    required int mainCategoryId,
+    int? secondaryCategoryId,
+    String? coverImagePath,
+  }) async {
+    final db = await initDb();
+    final now = DateTime.now().toIso8601String();
+
+    final Map<String, dynamic> data = {
+      'title': title,
+      'description': description,
+      'writer_name': writerName,
+      'age_limit': ageLimit,
+      'category_id': mainCategoryId,
+      'secondary_category_id': secondaryCategoryId,
+      'last_updated': now,
+    };
+
+    if (coverImagePath != null && coverImagePath.isNotEmpty) {
+      data['cover_image'] = coverImagePath;
+    }
+
+    return await db.update(
+      'Novels',
+      data,
+      where: 'novel_id = ?',
+      whereArgs: [novelId],
+    );
   }
 
   // ดึงนิยายทั้งหมดของผู้ใช้คนหนึ่ง
@@ -1211,7 +1295,7 @@ class DBHelper {
     final List<Map<String, dynamic>> maps = await db.query(
       'Novels',
       where: 'is_published = ? AND is_banned = ?',
-      whereArgs: [true, false],
+      whereArgs: [1, 0],
       limit: 7,
       orderBy: 'likes DESC, number_of_views DESC', // เน้น Like ก่อน View
     );
@@ -1228,7 +1312,7 @@ class DBHelper {
     final List<Map<String, dynamic>> maps = await db.query(
       'Novels',
       where: 'is_published = ? AND is_banned = ?',
-      whereArgs: [true, false],
+      whereArgs: [1, 0],
       limit: 7,
       // ใช้ last_updated สำหรับการอัพเดตบทใหม่
       orderBy: 'last_updated DESC',
@@ -1246,7 +1330,7 @@ class DBHelper {
     final List<Map<String, dynamic>> maps = await db.query(
       'Novels',
       where: 'is_published = ? AND is_banned = ?',
-      whereArgs: [true, false],
+      whereArgs: [1, 0],
       limit: 7,
       // ใช้ created_at เป็นตัวเลือกในการแนะนำ
       orderBy: 'created_at DESC',

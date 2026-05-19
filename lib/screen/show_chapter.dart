@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'package:mie_project/services/image_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -306,18 +306,11 @@ class _ChapterListScreenState extends State<ChapterListScreen> {
                       borderRadius: BorderRadius.circular(8),
                       child: (novelDetail?.coverImage != null &&
                                novelDetail!.coverImage!.isNotEmpty)
-                              ? Image.file(
-                                  File(novelDetail.coverImage!),
+                              ? buildCoverImage(
+                                  novelDetail.coverImage!,
+                                  width: 100,
+                                  height: 140,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return const Center(
-                                      child: Icon(
-                                        Icons.broken_image,
-                                        color: Colors.red,
-                                        size: 40,
-                                      ),
-                                    );
-                                  },
                                 )
                               : const Center(
                                   child: Icon(

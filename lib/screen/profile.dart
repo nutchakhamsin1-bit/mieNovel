@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'dart:io';
 import 'package:mie_project/screen/splash_screen.dart';
 import 'package:mie_project/services/db_helper.dart';
+import 'package:mie_project/services/image_provider_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'edit_profile.dart'; // Add this import
-import 'dart:io';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -154,7 +156,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           backgroundImage: userData['profileImage']!.isNotEmpty
                               ? (userData['profileImage']!.startsWith('http')
                                   ? NetworkImage(userData['profileImage']!)
-                                  : FileImage(File(userData['profileImage']!)) as ImageProvider)
+                                  : buildImageProvider(userData['profileImage']!) as ImageProvider)
                               : null,
                           child: userData['profileImage']!.isEmpty
                               ? Icon(
