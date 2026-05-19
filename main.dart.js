@@ -29763,7 +29763,7 @@ var $async$AE=A.l(function(a,b){if(a===1)return A.m(b,r)
 while(true)switch(s){case 0:s=4
 return A.f(A.dB(),$async$AE)
 case 4:s=3
-return A.f(b.a0G("Novels",7,"likes DESC, number_of_views DESC","is_published = ? AND is_banned = ?",[!0,!1]),$async$AE)
+return A.f(b.a0G("Novels",7,"likes DESC, number_of_views DESC","is_published = ? AND is_banned = ?",[1,0]),$async$AE)
 case 3:o=b
 n=J.aN(o)
 m=n.gG(o)
@@ -29779,7 +29779,7 @@ var $async$AF=A.l(function(a,b){if(a===1)return A.m(b,r)
 while(true)switch(s){case 0:s=4
 return A.f(A.dB(),$async$AF)
 case 4:s=3
-return A.f(b.a0G("Novels",7,"last_updated DESC","is_published = ? AND is_banned = ?",[!0,!1]),$async$AF)
+return A.f(b.a0G("Novels",7,"last_updated DESC","is_published = ? AND is_banned = ?",[1,0]),$async$AF)
 case 3:o=b
 n=J.aN(o)
 m=n.gG(o)
