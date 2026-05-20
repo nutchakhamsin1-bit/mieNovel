@@ -327,7 +327,7 @@ class _EditNovelScreenState extends State<EditNovelScreen> {
           children: [
             _buildLabel('หมวดหมู่หลัก'),
             DropdownButtonFormField<String>(
-              initialValue: _selectedMainCategory,
+              value: _selectedMainCategory,
               hint: const Text('เลือกหมวดหมู่หลัก'),
               isExpanded: true,
               items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
@@ -340,7 +340,7 @@ class _EditNovelScreenState extends State<EditNovelScreen> {
             const SizedBox(height: 16),
             _buildLabel('หมวดหมู่รอง (ไม่บังคับ)'),
             DropdownButtonFormField<String>(
-              initialValue: _selectedSecondaryCategory,
+              value: _selectedSecondaryCategory,
               hint: const Text('เลือกหมวดหมู่รอง'),
               isExpanded: true,
               items: [
@@ -369,7 +369,7 @@ class _EditNovelScreenState extends State<EditNovelScreen> {
           children: [
             _buildLabel('ระดับอายุ'),
             DropdownButtonFormField<String>(
-              initialValue: _selectedAgeLevel,
+              value: _selectedAgeLevel,
               hint: const Text('เลือกระดับอายุ'),
               isExpanded: true,
               items: _ageLevels.map((a) => DropdownMenuItem(value: a, child: Text(a))).toList(),

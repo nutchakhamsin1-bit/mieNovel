@@ -335,7 +335,7 @@ class _NewNovelScreenState extends State<NewNovelScreen> {
           children: [
             _buildLabel('หมวดหมู่หลัก'),
             DropdownButtonFormField<String>(
-              initialValue: _selectedMainCategory,
+              value: _selectedMainCategory,
               hint: const Text('เลือกหมวดหมู่หลัก'),
               items: _categories.map((category) {
                 return DropdownMenuItem(value: category, child: Text(category));
@@ -354,7 +354,7 @@ class _NewNovelScreenState extends State<NewNovelScreen> {
             const SizedBox(height: 16),
             _buildLabel('หมวดหมู่รอง'),
             DropdownButtonFormField<String>(
-              initialValue: _selectedSecondaryCategory,
+              value: _selectedSecondaryCategory,
               hint: const Text('เลือกหมวดหมู่รอง'),
               items: _categories
                   .where((category) => category != _selectedMainCategory)
@@ -393,7 +393,7 @@ class _NewNovelScreenState extends State<NewNovelScreen> {
               children: [
                 Expanded(
                   child: DropdownButtonFormField<String>(
-                    initialValue: _selectedAgeLevel,
+                    value: _selectedAgeLevel,
                     hint: const Text('เลือกระดับอายุ'),
                     items: _ageLevels.map((ageLevel) {
                       return DropdownMenuItem(
