@@ -51,18 +51,13 @@ class _ViewAllNovelsScreenState extends State<ViewAllNovelsScreen> {
           }
 
         case NovelListType.category:
-          // ✅ สำหรับดูทั้งหมดของหมวดหมู่
           if (widget.categoryFilter != null && widget.categoryFilter!.isNotEmpty) {
             return await DBHelper.getNovelsByCategory(widget.categoryFilter!);
           } else {
             return [];
           }
-
-        default:
-          return [];
       }
     } catch (e) {
-      print('❌ Error loading novels: $e');
       return [];
     }
   }

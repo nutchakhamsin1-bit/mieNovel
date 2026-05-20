@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:mie_project/admin/adminhomepage.dart';
-import 'package:mie_project/screen/sign_in.dart';
-import 'package:mie_project/screen/home.dart';
 import 'package:mie_project/screen/forget_password.dart';
+import 'package:mie_project/screen/home.dart';
+import 'package:mie_project/screen/sign_in.dart';
 import 'package:mie_project/services/db_helper.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:mie_project/theme/app_theme.dart';
+import 'package:mie_project/utils/app_logger.dart';
+import 'package:mie_project/utils/session_manager.dart';
 
 class LogRegis extends StatefulWidget {
   const LogRegis({super.key});
@@ -15,334 +17,233 @@ class LogRegis extends StatefulWidget {
 }
 
 class _LogRegisState extends State<LogRegis> {
-  final TextEditingController usernameController = TextEditingController();
-  final TextEditingController passwordController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  final _usernameController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _obscurePassword = true;
+  bool _isLoading = false;
 
-  bool isLoading = false;
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  void _showSnack(String message, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: error ? AppColors.error : AppColors.success,
+      ),
+    );
+  }
+
+  Future<void> _submit() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    final username = _usernameController.text.trim();
+    final password = _passwordController.text;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final admin = await DBHelper.adminLogin(username, password);
+      if (!mounted) return;
+      if (admin != null) {
+        await SessionManager.saveAdminId(admin['admin_id'] as int);
+        if (!mounted) return;
+        _showSnack('เข้าสู่ระบบผู้ดูแลสำเร็จ');
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const Adminhomepage()),
+        );
+        return;
+      }
+
+      final user = await DBHelper.loginUser(username, password);
+      if (!mounted) return;
+      if (user == null) {
+        _showSnack('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง', error: true);
+        return;
+      }
+
+      final status = user['status'];
+      if (status != 'active') {
+        final message = status == 'banned'
+            ? 'บัญชีของคุณถูกแบน ไม่สามารถเข้าสู่ระบบได้'
+            : 'บัญชีของคุณถูกระงับการใช้งาน';
+        _showSnack(message, error: true);
+        return;
+      }
+
+      await SessionManager.saveUserId(user['user_id'] as int);
+      if (!mounted) return;
+      _showSnack('เข้าสู่ระบบสำเร็จ');
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+      );
+    } catch (e, st) {
+      AppLogger.error('Login failed', e, st);
+      _showSnack('เกิดข้อผิดพลาดในการเข้าสู่ระบบ', error: true);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF00897B), Color(0xFF26A69A)], // Gradient colors
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
+        decoration: const BoxDecoration(gradient: AppColors.primaryGradient),
         child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    // App Logo
-                    Text(
-                      'mie novel',
-                      style: GoogleFonts.pacifico(
-                        fontSize: 48, // Reduced font size for better balance
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Your eyes begin the journey. This is mie.',
-                      style: TextStyle(fontSize: 14, color: Colors.white70),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 32),
-
-                    // Login Form
-                    Center(
-                      child: Container(
-                        width: 320, // Slightly reduced width for better fit
-                        padding: const EdgeInsets.all(24),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.lg,
+                vertical: AppSpacing.xl,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'mie novel',
+                    style: GoogleFonts.pacifico(
+                      fontSize: 56,
+                      color: Colors.white,
+                      letterSpacing: 1.2,
+                      shadows: [
+                        Shadow(
+                          color: Colors.black.withValues(alpha: 0.15),
+                          offset: const Offset(0, 4),
+                          blurRadius: 10,
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _buildTextField(
-                              controller: usernameController,
-                              hint: 'ชื่อผู้ใช้หรืออีเมล',
-                              obscureText: false,
-                              icon: Icons.email_outlined,
-                            ),
-                            const SizedBox(height: 16),
-                            _buildTextField(
-                              controller: passwordController,
-                              hint: 'รหัสผ่าน',
-                              obscureText: true,
-                              icon: Icons.lock_outline,
-                            ),
-                            const SizedBox(height: 8),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton(
-                                onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => const Forgetpass(),
-                                    ),
-                                  );
-                                },
-                                child: const Text(
-                                  'ลืมรหัสผ่าน?',
-                                  style: TextStyle(
-                                    color: Color(0xFF00897B),
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 24),
-                            ElevatedButton(
-                              onPressed: () async {
-                                final username = usernameController.text.trim();
-                                final password = passwordController.text.trim();
-
-                                if (username.isEmpty || password.isEmpty) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'กรุณากรอกชื่อผู้ใช้และรหัสผ่าน',
-                                      ),
-                                    ),
-                                  );
-                                  return;
-                                }
-
-                                setState(() => isLoading = true);
-
-                                try {
-                                  // 1. ตรวจสอบ Admin
-                                  final admin = await DBHelper.adminLogin(
-                                    username,
-                                    password,
-                                  );
-
-                                  if (!mounted) return;
-
-                                  if (admin != null) {
-                                    final prefs =
-                                        await SharedPreferences.getInstance();
-                                    await prefs.setInt(
-                                      'admin_id',
-                                      admin['admin_id'],
-                                    );
-
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'เข้าสู่ระบบผู้ดูแลสำเร็จ!',
-                                        ),
-                                      ),
-                                    );
-
-                                    await Future.delayed(
-                                      const Duration(milliseconds: 500),
-                                    );
-
-                                    if (!mounted) return;
-
-                                    Navigator.pushReplacement(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) =>
-                                            const Adminhomepage(), // ✅ admin redirect
-                                      ),
-                                    );
-                                    return; // ✅ ป้องกันไม่ให้ไปตรวจสอบ User
-                                  }
-
-                                  // 2. ตรวจสอบ User
-                                  final user = await DBHelper.loginUser(
-                                    username,
-                                    password,
-                                  );
-
-                                  if (user != null) {
-                                    // ⭐️ ส่วนที่เพิ่ม: ตรวจสอบสถานะผู้ใช้
-                                    if (user['status'] != 'active') {
-                                      String message = 'บัญชีของคุณถูกระงับการใช้งาน';
-                                      if (user['status'] == 'banned') {
-                                        message = 'บัญชีของคุณถูกแบน ไม่สามารถเข้าสู่ระบบได้';
-                                      } 
-                                      
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text(message),
-                                          backgroundColor: Colors.red,
-                                        ),
-                                      );
-                                      return; // ❌ ไม่อนุญาตให้ล็อกอินต่อ
-                                    }
-                                    // ⭐️ จบส่วนที่เพิ่ม
-
-                                    // 3. สถานะ active: ดำเนินการล็อกอิน
-                                    final prefs =
-                                        await SharedPreferences.getInstance();
-                                    await prefs.setInt(
-                                      'user_id',
-                                      user['user_id'],
-                                    );
-
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('เข้าสู่ระบบสำเร็จ!'),
-                                      ),
-                                    );
-
-                                    await Future.delayed(
-                                      const Duration(milliseconds: 500),
-                                    );
-
-                                    if (!mounted) return;
-
-                                    Navigator.pushReplacement(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) =>
-                                            const HomeScreen(),
-                                      ),
-                                    );
-                                  } else {
-                                    // 4. ล็อกอินไม่สำเร็จ (ทั้ง Admin และ User)
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง',
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                } catch (e) {
-                                  print("Login error: $e");
-                                  if (!mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'เกิดข้อผิดพลาดในการเข้าสู่ระบบ',
-                                      ),
-                                    ),
-                                  );
-                                } finally {
-                                  if (mounted)
-                                    setState(() => isLoading = false);
-                                }
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Color(0xFF00897B),
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 14,
-                                ),
-                                elevation: 3,
-                              ),
-                              child: isLoading
-                                  ? const SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                        color: Colors.white,
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Text(
-                                      'เข้าสู่ระบบ',
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      ],
                     ),
-
-                    const SizedBox(height: 16),
-
-                    // Sign Up Link
-                    TextButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const SignInScreen(),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Your eyes begin the journey.',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.9),
+                      fontSize: 14,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+                  Container(
+                    width: 360,
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    decoration: AppDecorations.card(),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            'เข้าสู่ระบบ',
+                            style: GoogleFonts.sarabun(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.primary,
+                            ),
+                            textAlign: TextAlign.center,
                           ),
-                        );
-                      },
-                      child: const Text.rich(
-                        TextSpan(
-                          text: "ยังไม่มีบัญชีใช่หรือไม่ ",
-                          style: TextStyle(color: Colors.white70),
-                          children: [
-                            TextSpan(
-                              text: 'ลงทะเบียน',
-                              style: TextStyle(color: Colors.white),
+                          const SizedBox(height: AppSpacing.lg),
+                          TextFormField(
+                            controller: _usernameController,
+                            textInputAction: TextInputAction.next,
+                            decoration: const InputDecoration(
+                              hintText: 'ชื่อผู้ใช้หรืออีเมล',
+                              prefixIcon: Icon(Icons.person_outline),
                             ),
-                          ],
-                        ),
+                            validator: (v) => (v == null || v.trim().isEmpty)
+                                ? 'กรุณากรอกชื่อผู้ใช้หรืออีเมล'
+                                : null,
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                          TextFormField(
+                            controller: _passwordController,
+                            obscureText: _obscurePassword,
+                            textInputAction: TextInputAction.done,
+                            onFieldSubmitted: (_) => _submit(),
+                            decoration: InputDecoration(
+                              hintText: 'รหัสผ่าน',
+                              prefixIcon: const Icon(Icons.lock_outline),
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscurePassword
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                ),
+                                onPressed: () => setState(
+                                  () => _obscurePassword = !_obscurePassword,
+                                ),
+                              ),
+                            ),
+                            validator: (v) => (v == null || v.isEmpty)
+                                ? 'กรุณากรอกรหัสผ่าน'
+                                : null,
+                          ),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const Forgetpass(),
+                                ),
+                              ),
+                              child: const Text('ลืมรหัสผ่าน?'),
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          ElevatedButton(
+                            onPressed: _isLoading ? null : _submit,
+                            child: _isLoading
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Text('เข้าสู่ระบบ'),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  TextButton(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SignInScreen()),
+                    ),
+                    style: TextButton.styleFrom(foregroundColor: Colors.white),
+                    child: const Text.rich(
+                      TextSpan(
+                        text: 'ยังไม่มีบัญชี? ',
+                        style: TextStyle(color: Colors.white70),
+                        children: [
+                          TextSpan(
+                            text: 'ลงทะเบียน',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String hint,
-    required bool obscureText,
-    required IconData icon,
-  }) {
-    return TextField(
-      controller: controller,
-      obscureText: obscureText,
-      style: GoogleFonts.roboto(
-        color: const Color.fromARGB(255, 89, 89, 89),
-        fontSize: 14,
-      ),
-      decoration: InputDecoration(
-        prefixIcon: Icon(icon, color: Colors.grey),
-        hintText: hint,
-        hintStyle: GoogleFonts.roboto(
-          color: const Color.fromARGB(255, 188, 188, 188),
-          fontSize: 14,
-        ),
-        filled: true,
-        fillColor: const Color(0xFFF5F5F5),
-        contentPadding: const EdgeInsets.symmetric(
-          vertical: 12,
-          horizontal: 16,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
         ),
       ),
     );

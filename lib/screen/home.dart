@@ -1,13 +1,16 @@
-import 'dart:io';
 import 'package:mie_project/services/image_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:convex_bottom_bar/convex_bottom_bar.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:mie_project/models/novel.dart';
+import 'package:mie_project/screen/search.dart';
 import 'package:mie_project/screen/show_chapter.dart';
 import 'package:mie_project/screen/view_all_novels_screen.dart';
 import 'package:mie_project/services/db_helper.dart';
 import 'package:mie_project/services/novel_type.dart';
+import 'package:mie_project/theme/app_theme.dart';
+import 'package:mie_project/utils/app_logger.dart';
+import 'package:mie_project/utils/session_manager.dart';
 import 'book_shelf.dart';
 import 'write.dart';
 import 'profile.dart';
@@ -25,6 +28,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Novel> _hotNovels = [];
   List<Novel> _latestNovels = [];
   List<Novel> _aiRecommendedNovels = [];
+  List<Map<String, dynamic>> _recentReads = const [];
   bool _isLoading = true;
   String? _aiPreferredGenre;
 
@@ -42,32 +46,29 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _fetchNovelData() async {
-    print("🔹 เริ่มโหลดข้อมูลนิยาย...");
+    AppLogger.debug('Loading novel data...');
     try {
       final hotData = await DBHelper.getHotNovels();
-      print('✅ Hot Novels: $hotData');
-
       final latestData = await DBHelper.getLatestNovels();
-      print('✅ Latest Novels: $latestData');
-
       final currentUser = await DBHelper.getLoggedInUser();
-      print('👤 Current User: $currentUser');
 
       List<Novel> aiData = [];
       String? aiGenre;
 
       if (currentUser != null && currentUser['ai_analysis_data'] != null) {
         aiGenre = currentUser['ai_analysis_data'];
-        print('🧠 AI Preferred Genre: $aiGenre');
         aiData = await DBHelper.getRecommendedNovelsByAI(aiGenre!);
-        print('✅ AI Recommended Novels: $aiData');
       }
 
-      // ถ้าไม่มีนิยายแนะนำ ให้ใช้นิยายล่าสุดแทน
       if (aiData.isEmpty) {
-        print('⚠️ No AI recommendations available, using latest novels instead');
         aiData = latestData;
         aiGenre = 'อัพเดตล่าสุด';
+      }
+
+      List<Map<String, dynamic>> recent = const [];
+      final userId = await SessionManager.getUserId();
+      if (userId != null) {
+        recent = await DBHelper.getRecentReadHistory(userId, limit: 6);
       }
 
       setState(() {
@@ -75,10 +76,11 @@ class _HomeScreenState extends State<HomeScreen> {
         _latestNovels = latestData;
         _aiPreferredGenre = aiGenre;
         _aiRecommendedNovels = aiData;
+        _recentReads = recent;
         _isLoading = false;
       });
-    } catch (e) {
-      print('Error fetching novel data: $e');
+    } catch (e, st) {
+      AppLogger.error('Error fetching novel data', e, st);
       setState(() {
         _isLoading = false;
       });
@@ -479,7 +481,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.grey.withOpacity(0.1),
+                              color: Colors.grey.withValues(alpha: 0.1),
                               spreadRadius: 1,
                               blurRadius: 1,
                             ),
@@ -535,7 +537,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   Container(
                                     padding: const EdgeInsets.all(12),
                                     decoration: BoxDecoration(
-                                      color: (category['color'] as Color).withOpacity(0.1),
+                                      color: (category['color'] as Color).withValues(alpha: 0.1),
                                       borderRadius: BorderRadius.circular(12),
                                     ),
                                     child: Icon(
@@ -607,7 +609,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: (categories[index]['color'] as Color).withOpacity(0.1),
+                  color: (categories[index]['color'] as Color).withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
@@ -629,109 +631,94 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // 🔍 Search (เหมือนเดิม)
-  final TextEditingController _searchController = TextEditingController();
-  List<Novel> _searchResults = [];
-  bool _isSearching = false;
-
-  void _performSearch(String query) async {
-    if (query.isEmpty) {
-      setState(() {
-        _isSearching = false;
-        _searchResults.clear();
-      });
-      return;
-    }
-
-    setState(() {
-      _isSearching = true;
-    });
-
-    final allNovels = [
-      ..._hotNovels,
-      ..._latestNovels,
-      ..._aiRecommendedNovels,
-    ];
-    final results = allNovels
-        .where(
-          (novel) =>
-              novel.title.toLowerCase().contains(query.toLowerCase()) ||
-              novel.writerName.toLowerCase().contains(query.toLowerCase()),
-        )
-        .toList();
-
-    setState(() {
-      _searchResults = results;
-    });
-  }
-
-  Widget _buildSearchResults() {
-    if (_searchResults.isEmpty) {
-      return Center(
-        child: Text(
-          'ไม่พบนิยายที่คุณค้นหา',
-          style: GoogleFonts.sarabun(fontSize: 16, color: Colors.grey[600]),
-        ),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: _searchResults.length,
-      itemBuilder: (context, index) {
-        final novel = _searchResults[index];
-        return Card(
-          elevation: 2,
-          margin: const EdgeInsets.only(bottom: 12),
-          child: ListTile(
-            leading: Container(
-              width: 50,
-              height: 70,
-              decoration: BoxDecoration(borderRadius: BorderRadius.circular(4)),
-              child: novel.coverImage != null && novel.coverImage!.isNotEmpty
-                  ? ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: buildCoverImage(
-                        novel.coverImage!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return const Icon(Icons.broken_image);
-                        },
-                      ),
-                    )
-                  : const Icon(Icons.book),
-            ),
-            title: Text(
-              novel.title,
-              style: GoogleFonts.sarabun(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
+  Widget _buildRecentReads() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Row(
+            children: [
+              const Icon(Icons.history, color: AppColors.primary),
+              const SizedBox(width: 8),
+              Text(
+                'อ่านล่าสุด',
+                style: GoogleFonts.sarabun(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
               ),
-            ),
-            subtitle: Text(
-              novel.writerName,
-              style: GoogleFonts.sarabun(fontSize: 14, color: Colors.grey[600]),
-            ),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ChapterListScreen(
-                    novelId: novel.novelId,
-                    novelTitle: novel.title,
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 140,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            itemCount: _recentReads.length,
+            itemBuilder: (context, index) {
+              final entry = _recentReads[index];
+              final cover = entry['cover_image'] as String?;
+              final title = (entry['novel_title'] as String?) ?? 'ไม่มีชื่อ';
+              final novelId = entry['novel_id'] as int?;
+              if (novelId == null) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ChapterListScreen(
+                        novelId: novelId,
+                        novelTitle: title,
+                      ),
+                    ),
+                  ),
+                  child: SizedBox(
+                    width: 90,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(AppRadius.sm),
+                          child: SizedBox(
+                            width: 90,
+                            height: 110,
+                            child: cover != null && cover.isNotEmpty
+                                ? buildCoverImage(cover, fit: BoxFit.cover)
+                                : Container(
+                                    color: Colors.grey[300],
+                                    child: const Icon(Icons.book),
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          title,
+                          style: GoogleFonts.sarabun(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               );
             },
           ),
-        );
-      },
+        ),
+      ],
     );
   }
 
   @override
   void dispose() {
-    _searchController.dispose();
     super.dispose();
   }
 
@@ -749,81 +736,102 @@ class _HomeScreenState extends State<HomeScreen> {
                       Container(
                         padding: const EdgeInsets.fromLTRB(16, 40, 16, 8),
                         color: Colors.white,
-                        child: TextField(
-                          controller: _searchController,
-                          onChanged: _performSearch,
-                          decoration: InputDecoration(
-                            hintText: 'ค้นหานิยาย...',
-                            hintStyle: GoogleFonts.sarabun(
-                              color: Colors.grey[400],
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const SearchScreen(),
                             ),
-                            prefixIcon: const Icon(
-                              Icons.search,
-                              color: Color(0xFF26A69A),
-                            ),
-                            filled: true,
-                            fillColor: Colors.grey[100],
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide.none,
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
+                          ),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
                               horizontal: 16,
-                              vertical: 12,
+                              vertical: 14,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[100],
+                              borderRadius: BorderRadius.circular(AppRadius.md),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.search,
+                                  color: AppColors.primary,
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  'ค้นหานิยาย ผู้เขียน หมวดหมู่...',
+                                  style: GoogleFonts.sarabun(
+                                    color: Colors.grey[500],
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                const Spacer(),
+                                const Icon(
+                                  Icons.tune,
+                                  color: AppColors.textHint,
+                                  size: 20,
+                                ),
+                              ],
                             ),
                           ),
                         ),
                       ),
                       Expanded(
-                        child: _isSearching
-                            ? _buildSearchResults()
-                            : SingleChildScrollView(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const SizedBox(height: 8),
-                                    _buildNovelSection(
-                                      title: 'นิยายมาแรง',
-                                      novels: _hotNovels,
-                                      icon: Icons.whatshot,
-                                      type: NovelListType.hot,
-                                    ),
-                                    const SizedBox(height: 24),
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 16.0,
-                                      ),
-                                      child: Text(
-                                        'หมวดหมู่นิยาย',
-                                        style: GoogleFonts.sarabun(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.black87,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 16),
-                                    _buildCategoryGrid(),
-                                    const SizedBox(height: 24),
-                                    _buildNovelSection(
-                                      title: 'อัพเดตล่าสุด',
-                                      novels: _latestNovels,
-                                      icon: Icons.update,
-                                      type: NovelListType.latest,
-                                    ),
-                                    const SizedBox(height: 24),
-                                    _buildNovelSection(
-                                      title: _aiPreferredGenre != null
-                                          ? 'แนะนำสำหรับคุณ (${_aiPreferredGenre!})'
-                                          : 'แนะนำสำหรับคุณ',
-                                      novels: _aiRecommendedNovels,
-                                      icon: Icons.star,
-                                      type: NovelListType.recommended,
-                                    ),
-                                    const SizedBox(height: 32),
-                                  ],
+                        child: RefreshIndicator(
+                          onRefresh: _fetchNovelData,
+                          child: SingleChildScrollView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (_recentReads.isNotEmpty)
+                                  _buildRecentReads(),
+                                const SizedBox(height: 8),
+                                _buildNovelSection(
+                                  title: 'นิยายมาแรง',
+                                  novels: _hotNovels,
+                                  icon: Icons.whatshot,
+                                  type: NovelListType.hot,
                                 ),
-                              ),
+                                const SizedBox(height: 24),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16.0,
+                                  ),
+                                  child: Text(
+                                    'หมวดหมู่นิยาย',
+                                    style: GoogleFonts.sarabun(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                _buildCategoryGrid(),
+                                const SizedBox(height: 24),
+                                _buildNovelSection(
+                                  title: 'อัพเดตล่าสุด',
+                                  novels: _latestNovels,
+                                  icon: Icons.update,
+                                  type: NovelListType.latest,
+                                ),
+                                const SizedBox(height: 24),
+                                _buildNovelSection(
+                                  title: _aiPreferredGenre != null
+                                      ? 'แนะนำสำหรับคุณ (${_aiPreferredGenre!})'
+                                      : 'แนะนำสำหรับคุณ',
+                                  novels: _aiRecommendedNovels,
+                                  icon: Icons.star,
+                                  type: NovelListType.recommended,
+                                ),
+                                const SizedBox(height: 32),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
                     ],
                   )

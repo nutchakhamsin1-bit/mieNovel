@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mie_project/screen/NotificationPage.dart';
@@ -305,7 +305,7 @@ class _WriteScreenState extends State<WriteScreen> {
               borderRadius: BorderRadius.circular(4.0),
               child: ColorFiltered( // ใช้ ColorFiltered เพื่อลดความสว่างถ้าถูกแบน
                 colorFilter: isBanned
-                    ? ColorFilter.mode(Colors.grey.withOpacity(0.5), BlendMode.saturation)
+                    ? ColorFilter.mode(Colors.grey.withValues(alpha: 0.5), BlendMode.saturation)
                     : const ColorFilter.mode(Colors.transparent, BlendMode.dst),
                 child: Image(
                   image: imageProvider,

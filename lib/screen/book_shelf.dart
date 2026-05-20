@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:mie_project/services/image_helper.dart';
 import 'package:mie_project/screen/show_chapter.dart';
 import 'package:mie_project/services/db_helper.dart';
@@ -116,7 +116,7 @@ class _BookShelfScreenState extends State<BookShelfScreen> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF26A69A).withOpacity(0.12),
+                                color: const Color(0xFF26A69A).withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: Row(
@@ -187,13 +187,13 @@ class _BookShelfScreenState extends State<BookShelfScreen> {
             decoration: BoxDecoration(
               color: isError
                   ? Colors.red.shade50
-                  : const Color(0xFF26A69A).withOpacity(0.08),
+                  : const Color(0xFF26A69A).withValues(alpha: 0.08),
               shape: BoxShape.circle,
             ),
             child: Icon(
               icon,
               size: 56,
-              color: isError ? Colors.red.shade300 : const Color(0xFF26A69A).withOpacity(0.5),
+              color: isError ? Colors.red.shade300 : const Color(0xFF26A69A).withValues(alpha: 0.5),
             ),
           ),
           const SizedBox(height: 20),
@@ -254,7 +254,7 @@ class _NovelCoverItem extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.15),
+                    color: Colors.black.withValues(alpha: 0.15),
                     blurRadius: 6,
                     offset: const Offset(0, 3),
                   ),
@@ -289,7 +289,7 @@ class _NovelCoverItem extends StatelessWidget {
                               begin: Alignment.bottomCenter,
                               end: Alignment.topCenter,
                               colors: [
-                                Colors.black.withOpacity(0.45),
+                                Colors.black.withValues(alpha: 0.45),
                                 Colors.transparent,
                               ],
                             ),

@@ -1,8 +1,9 @@
-import 'package:flutter/foundation.dart';
+﻿import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mie_project/screen/edit_novel.dart';
 import 'package:mie_project/screen/new_chapter.dart';
 import 'package:mie_project/screen/write_novel.dart';
+import 'package:mie_project/screen/writer_dashboard.dart';
 import 'package:mie_project/services/db_helper.dart';
 import 'package:mie_project/services/image_provider_helper.dart';
 import 'dart:io';
@@ -293,7 +294,7 @@ class _ManageNovelWriterState extends State<ManageNovelWriter> {
 
     final ImageProvider imageProvider =
         coverImagePath.isNotEmpty && (kIsWeb || File(coverImagePath).existsSync())
-        ? buildImageProvider(coverImagePath) as ImageProvider
+        ? buildImageProvider(coverImagePath)
         : const AssetImage('assets/placeholder.png');
 
     final bool hasCover = coverImagePath.isNotEmpty && (kIsWeb || File(coverImagePath).existsSync());
@@ -319,6 +320,19 @@ class _ManageNovelWriterState extends State<ManageNovelWriter> {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.analytics_outlined, color: Colors.white),
+            tooltip: 'สถิติ',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => WriterDashboard(
+                  novelId: widget.novelId,
+                  novelTitle: novelTitle,
+                ),
+              ),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.edit, color: Colors.white),
             tooltip: 'แก้ไขข้อมูลนิยาย',
@@ -355,7 +369,7 @@ class _ManageNovelWriterState extends State<ManageNovelWriter> {
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
+                        color: Colors.black.withValues(alpha: 0.2),
                         blurRadius: 10,
                         offset: const Offset(0, 5),
                       ),

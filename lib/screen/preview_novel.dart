@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:mie_project/services/db_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:io';
 
 class PreviewNovelScreen extends StatefulWidget {
   const PreviewNovelScreen({super.key});

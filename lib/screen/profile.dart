@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
-import 'dart:io';
 import 'package:mie_project/screen/splash_screen.dart';
 import 'package:mie_project/services/db_helper.dart';
 import 'package:mie_project/services/image_provider_helper.dart';
+import 'package:mie_project/utils/app_logger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'edit_profile.dart'; // Add this import
+import 'edit_profile.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -30,34 +29,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final db = await DBHelper.initDb();
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getInt('user_id');
-    print('📱 Fetching profile for user_id: $userId');
+    AppLogger.debug('Fetching profile for user_id: $userId');
 
     final List<Map<String, dynamic>> result = await db.query(
       'Users',
       where: 'user_id = ?',
       whereArgs: [userId],
     );
-    
-    print('📱 Query result: $result');
-
-    // final users = await db.query('Users');
-    // print('👤 All users: $users');
-
-    // print('📦 userId: $userId');
-    // print('📦 query result: $result');
-
-    
 
     if (result.isNotEmpty) {
       final user = result.first;
-      String avatar = user['avatar_image'] ?? '';
-      print('👤 Fetched user data(avatar): $avatar');
-      print('🧩 avatar_image in DB: ${user['avatar_image']}');
-
       return {
         'name': user['name'] ?? 'Unknown User',
         'email': user['email'] ?? 'No Email',
-        'profileImage': user['avatar_image'] ?? '',  // Using 'avater_image' as it's spelled in the DB
+        'profileImage': user['avatar_image'] ?? '',
       };
     } else {
       return {
@@ -92,7 +77,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
       ),
       body: FutureBuilder<Map<String, String>>(
-        future: _fetchUserData(),
+        future: _userDataFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(
@@ -122,7 +107,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
+                        color: Colors.black.withValues(alpha: 0.1),
                         blurRadius: 50,
                         spreadRadius: 1,
                         offset: const Offset(0, 1),
@@ -144,7 +129,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
+                              color: Colors.black.withValues(alpha: 0.1),
                               blurRadius: 20,
                               spreadRadius: 2,
                             ),
@@ -156,7 +141,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           backgroundImage: userData['profileImage']!.isNotEmpty
                               ? (userData['profileImage']!.startsWith('http')
                                   ? NetworkImage(userData['profileImage']!)
-                                  : buildImageProvider(userData['profileImage']!) as ImageProvider)
+                                  : buildImageProvider(userData['profileImage']!))
                               : null,
                           child: userData['profileImage']!.isEmpty
                               ? Icon(
@@ -176,7 +161,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         decoration: BoxDecoration(
                           border: Border(
                             bottom: BorderSide(
-                              color: Colors.brown.withOpacity(0.2),
+                              color: Colors.brown.withValues(alpha: 0.2),
                             ),
                           ),
                         ),
@@ -195,7 +180,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               height: 2,
                               width: 40,
                               decoration: BoxDecoration(
-                                color: Color(0xFF26A69A).withOpacity(0.3),
+                                color: Color(0xFF26A69A).withValues(alpha: 0.3),
                                 borderRadius: BorderRadius.circular(2),
                               ),
                             ),
@@ -211,8 +196,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ),
                       const SizedBox(height: 40),
-                      Container(
-                        width: 200, // Fixed width for both buttons
+                      SizedBox(
+                        width: 200,
                         child: ElevatedButton(
                           onPressed: () async {
                             final bool? isUpdated = await Navigator.push(
@@ -242,13 +227,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      Container(
-                        width: 200, // Same width as edit profile button
+                      SizedBox(
+                        width: 200,
                         child: ElevatedButton(
                           onPressed: () async {
-                            // Handle Log Out action
                             final prefs = await SharedPreferences.getInstance();
-                            await prefs.remove('user_id'); // ล้าง session
+                            await prefs.remove('user_id');
+                            await prefs.remove('admin_id');
+                            if (!context.mounted) return;
                             Navigator.pushReplacement(
                               context,
                               MaterialPageRoute(

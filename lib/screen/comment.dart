@@ -311,8 +311,9 @@ class _CommentPageState extends State<CommentPage> {
                                                             : Colors.grey,
                                                       ),
                                                       onPressed: () async {
-                                                        if (userId == null)
+                                                        if (userId == null) {
                                                           return;
+                                                        }
                                                         if (liked) {
                                                           await DBHelper.removeCommentLike(
                                                             userId!,
@@ -367,7 +368,7 @@ class _CommentPageState extends State<CommentPage> {
                                   ),
                                 ),
                               );
-                            }).toList(),
+                            }),
                         ],
                       );
                       // *** END: โค้ดที่ถูกแก้ไข ***

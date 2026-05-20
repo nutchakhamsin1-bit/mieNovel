@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:mie_project/screen/home.dart';
 import 'package:mie_project/services/db_helper.dart';
+import 'package:mie_project/theme/app_theme.dart';
+import 'package:mie_project/utils/app_logger.dart';
+import 'package:mie_project/utils/security.dart';
 
 class Forgetpass extends StatefulWidget {
   const Forgetpass({super.key});
@@ -10,156 +12,174 @@ class Forgetpass extends StatefulWidget {
 }
 
 class _ForgotPasswordPageState extends State<Forgetpass> {
-  final emailController = TextEditingController();
-  final passwordController = TextEditingController();
-  final confirmPasswordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
 
-  void _resetPassword() async {
-    final email = emailController.text;
-    final newPassword = passwordController.text;
-    final confirmPassword = confirmPasswordController.text;
+  bool _isLoading = false;
+  bool _obscurePassword = true;
+  bool _obscureConfirm = true;
 
-    if (email.isEmpty || newPassword.isEmpty || confirmPassword.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('กรุณากรอกข้อมูลให้ครบถ้วน')),
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  void _showSnack(String message, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: error ? AppColors.error : AppColors.success,
+      ),
+    );
+  }
+
+  Future<void> _resetPassword() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    setState(() => _isLoading = true);
+    try {
+      final affected = await DBHelper.resetPassword(
+        _emailController.text,
+        _passwordController.text,
       );
-      return;
-    }
-
-    if (newPassword.isEmpty != confirmPassword.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('กรุณากรอกรหัสผ่านให้ตรงกัน')),
-      );
-      return;
-    }
-
-    {
-      final data = await DBHelper.resetPassword(email, newPassword);
-      if (data > 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('เปลี่ยนรหัสผ่านสำเร็จ')),
-        );
+      if (!mounted) return;
+      if (affected > 0) {
+        _showSnack('เปลี่ยนรหัสผ่านสำเร็จ');
+        Navigator.pop(context);
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('ไม่พบอีเมลนี้ในระบบ')),
-        );
-        return;
+        _showSnack('ไม่พบอีเมลนี้ในระบบ', error: true);
       }
-
-      
+    } catch (e, st) {
+      AppLogger.error('Reset password failed', e, st);
+      _showSnack('เกิดข้อผิดพลาดในการเปลี่ยนรหัสผ่าน', error: true);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
-
-    Navigator.pop(context);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
       body: Stack(
         children: [
-          Container(
-            height: 200,
-            decoration: BoxDecoration(
-              color: Color(0xFF26A69A),
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(30),
-                bottomRight: Radius.circular(30),
-              ),
-            ),
-          ),
+          Container(height: 220, decoration: AppDecorations.gradientHeader()),
           SafeArea(
             child: SingleChildScrollView(
               child: Padding(
-                padding: const EdgeInsets.all(24.0),
+                padding: const EdgeInsets.all(AppSpacing.lg),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     IconButton(
-                      icon: Icon(Icons.arrow_back_ios, color: Colors.white),
+                      icon: const Icon(
+                        Icons.arrow_back_ios,
+                        color: Colors.white,
+                      ),
                       onPressed: () => Navigator.pop(context),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: AppSpacing.md),
                     Container(
-                      padding: const EdgeInsets.all(24),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 20,
-                            offset: Offset(0, 10),
-                          ),
-                        ],
-                      ),
+                      padding: const EdgeInsets.all(AppSpacing.lg),
+                      decoration: AppDecorations.card(),
                       child: Form(
                         key: _formKey,
                         child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Text(
+                            const Text(
                               'เปลี่ยนรหัสผ่าน',
                               style: TextStyle(
-                                fontSize: 24,
+                                fontSize: 22,
                                 fontWeight: FontWeight.bold,
-                                color: Color(0xFF26A69A),
+                                color: AppColors.primary,
                               ),
                             ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'กรอกข้อมูลเพื่อเปลี่ยนรหัสผ่าน',
+                            const SizedBox(height: AppSpacing.xs),
+                            const Text(
+                              'กรอกอีเมลที่ลงทะเบียนไว้ และตั้งรหัสผ่านใหม่',
                               style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey[600],
+                                fontSize: 13,
+                                color: AppColors.textSecondary,
                               ),
                             ),
-                            const SizedBox(height: 32),
-                            _buildInputField(
-                              controller: emailController,
-                              label: 'อีเมล',
-                              icon: Icons.email_outlined,
-                              isPassword: false,
+                            const SizedBox(height: AppSpacing.lg),
+                            TextFormField(
+                              controller: _emailController,
+                              keyboardType: TextInputType.emailAddress,
+                              validator: InputValidator.validateEmail,
+                              decoration: const InputDecoration(
+                                labelText: 'อีเมล',
+                                prefixIcon: Icon(Icons.email_outlined),
+                              ),
                             ),
-                            const SizedBox(height: 20),
-                            _buildInputField(
-                              controller: passwordController,
-                              label: 'รหัสผ่านใหม่',
-                              icon: Icons.lock_outline,
-                              isPassword: true,
-                            ),
-                            const SizedBox(height: 20),
-                            _buildInputField(
-                              controller: confirmPasswordController,
-                              label: 'ยืนยันรหัสผ่าน',
-                              icon: Icons.lock_outline,
-                              isPassword: true,
-                            ),
-                            const SizedBox(height: 32),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton(
-                                onPressed: _resetPassword,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Color(0xFF26A69A),
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 16,
+                            const SizedBox(height: AppSpacing.md),
+                            TextFormField(
+                              controller: _passwordController,
+                              obscureText: _obscurePassword,
+                              validator: InputValidator.validatePassword,
+                              decoration: InputDecoration(
+                                labelText: 'รหัสผ่านใหม่',
+                                prefixIcon: const Icon(Icons.lock_outline),
+                                suffixIcon: IconButton(
+                                  icon: Icon(
+                                    _obscurePassword
+                                        ? Icons.visibility_outlined
+                                        : Icons.visibility_off_outlined,
                                   ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  elevation: 0,
-                                ),
-                                child: const Text(
-                                  'เปลี่ยนรหัสผ่าน',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
+                                  onPressed: () => setState(
+                                    () =>
+                                        _obscurePassword = !_obscurePassword,
                                   ),
                                 ),
                               ),
+                            ),
+                            const SizedBox(height: AppSpacing.md),
+                            TextFormField(
+                              controller: _confirmPasswordController,
+                              obscureText: _obscureConfirm,
+                              validator: (v) {
+                                if (v == null || v.isEmpty) {
+                                  return 'กรุณายืนยันรหัสผ่าน';
+                                }
+                                if (v != _passwordController.text) {
+                                  return 'รหัสผ่านไม่ตรงกัน';
+                                }
+                                return null;
+                              },
+                              decoration: InputDecoration(
+                                labelText: 'ยืนยันรหัสผ่าน',
+                                prefixIcon: const Icon(Icons.lock_outline),
+                                suffixIcon: IconButton(
+                                  icon: Icon(
+                                    _obscureConfirm
+                                        ? Icons.visibility_outlined
+                                        : Icons.visibility_off_outlined,
+                                  ),
+                                  onPressed: () => setState(
+                                    () => _obscureConfirm = !_obscureConfirm,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: AppSpacing.lg),
+                            ElevatedButton(
+                              onPressed: _isLoading ? null : _resetPassword,
+                              child: _isLoading
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white,
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Text('เปลี่ยนรหัสผ่าน'),
                             ),
                           ],
                         ),
@@ -172,67 +192,6 @@ class _ForgotPasswordPageState extends State<Forgetpass> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildInputField({
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    required bool isPassword,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.grey[700],
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        const SizedBox(height: 8),
-        TextFormField(
-          controller: controller,
-          obscureText: isPassword,
-          decoration: InputDecoration(
-            prefixIcon: Icon(icon, color: Colors.grey[600], size: 22),
-            filled: true,
-            fillColor: Colors.grey[100],
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Color(0xFF26A69A), width: 1.5),
-            ),
-            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          ),
-          validator: (value) {
-            if (value == null || value.isEmpty) {
-              return 'กรุณากรอกข้อมูล';
-            }
-            if (!isPassword && !value.contains('@')) {
-              return 'รูปแบบอีเมลไม่ถูกต้อง';
-            }
-            if (isPassword && value.length < 6) {
-              return 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร';
-            }
-            if (isPassword &&
-                controller == confirmPasswordController &&
-                value != passwordController.text) {
-              return 'รหัสผ่านไม่ตรงกัน';
-            }
-            return null;
-          },
-        ),
-      ],
     );
   }
 }

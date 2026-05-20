@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mie_project/services/db_helper.dart';
 import 'home.dart';
@@ -86,14 +86,6 @@ class _PersonalityQuizPageState extends State<PersonalityQuizPage> {
       result = traitToGenre[topTrait];
     });
 
-    // ✅ สร้างข้อมูลที่ AI วิเคราะห์ออกมา (Data Export)
-    final aiResultData = {
-      'trait_summary': traitCount,
-      'top_trait': topTrait,
-      'suggested_genre': result!,
-    };
-
-    // ✅ บันทึกผล AI ลงฐานข้อมูล
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getInt('user_id');
 
@@ -103,24 +95,20 @@ class _PersonalityQuizPageState extends State<PersonalityQuizPage> {
       });
     }
 
-    // ✅ แสดง SnackBar พร้อมข้อมูลที่ส่งออก
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('AI วิเคราะห์ผลและบันทึกข้อมูลเรียบร้อย! 🎉\n($aiResultData)'),
+        content: Text('AI แนะนำแนวที่เหมาะกับคุณ: ${result!}'),
         duration: const Duration(seconds: 3),
       ),
     );
 
-    // ✅ ตัวอย่าง: print ส่งออก (จะเห็นใน console / log)
-    // debugPrint('🧠 AI Export Data: $aiResultData');
-
-    // ✅ ไปหน้า Home หลังบันทึก
-    Future.delayed(const Duration(milliseconds: 800), () {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
-      );
-    });
+    await Future.delayed(const Duration(milliseconds: 800));
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const HomeScreen()),
+    );
   }
 
   Widget _buildImageOptionButton(String label, String trait, int questionId, String imageUrl) {
@@ -136,8 +124,8 @@ class _PersonalityQuizPageState extends State<PersonalityQuizPage> {
           boxShadow: [
             BoxShadow(
               color: isSelected
-                  ? Theme.of(context).primaryColor.withOpacity(0.3)
-                  : Colors.black.withOpacity(0.05),
+                  ? Theme.of(context).primaryColor.withValues(alpha: 0.3)
+                  : Colors.black.withValues(alpha: 0.05),
               blurRadius: isSelected ? 12 : 6,
               offset: const Offset(0, 4),
             ),
@@ -156,7 +144,7 @@ class _PersonalityQuizPageState extends State<PersonalityQuizPage> {
                     Image.asset(imageUrl, fit: BoxFit.cover),
                     if (isSelected)
                       Container(
-                        color: Theme.of(context).primaryColor.withOpacity(0.2),
+                        color: Theme.of(context).primaryColor.withValues(alpha: 0.2),
                         child: const Icon(Icons.check_circle, color: Colors.white, size: 40),
                       ),
                   ],
@@ -192,7 +180,7 @@ class _PersonalityQuizPageState extends State<PersonalityQuizPage> {
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 16,
             offset: const Offset(0, 6),
           ),

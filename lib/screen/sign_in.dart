@@ -1,275 +1,330 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:mie_project/screen/ai_recommend.dart';
 import 'package:mie_project/services/db_helper.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:mie_project/theme/app_theme.dart';
+import 'package:mie_project/utils/app_logger.dart';
+import 'package:mie_project/utils/security.dart';
+import 'package:mie_project/utils/session_manager.dart';
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
 
   @override
-  _SignInScreenState createState() => _SignInScreenState();
+  State<SignInScreen> createState() => _SignInScreenState();
 }
 
 class _SignInScreenState extends State<SignInScreen> {
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _comfirmPasswordController = TextEditingController();
-  final TextEditingController _usernameController = TextEditingController();
-  final TextEditingController _firstNameController = TextEditingController();
-  final TextEditingController _lastNameController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+  final _usernameController = TextEditingController();
+  final _firstNameController = TextEditingController();
+  final _lastNameController = TextEditingController();
 
   DateTime? _selectedDate;
   dynamic _profileImage;
+  bool _isLoading = false;
+  bool _obscurePassword = true;
+  bool _obscureConfirm = true;
 
-  void _sign_in () async{
-    // Implement sign-in logic here
-    final email = _emailController.text;
-    final newPassword = _passwordController.text;
-    final confirmPassword = _comfirmPasswordController.text;
-    final username = _usernameController.text;
-    final firstName = _firstNameController.text;
-    final lastName = _lastNameController.text;
-    final dateTime = _selectedDate.toString();
-    final profileImage = _profileImage.toString();
-    if (email.isEmpty ||
-        newPassword.isEmpty ||
-        confirmPassword.isEmpty ||
-        username.isEmpty ||
-        firstName.isEmpty ||
-        lastName.isEmpty ||
-        _selectedDate == null ||
-        profileImage.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('กรุณากรอกข้อมูลให้ครบถ้วน')),
-      );
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    _usernameController.dispose();
+    _firstNameController.dispose();
+    _lastNameController.dispose();
+    super.dispose();
+  }
+
+  void _showSnack(String message, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: error ? AppColors.error : AppColors.success,
+      ),
+    );
+  }
+
+  Future<void> _selectDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime(now.year - 18, now.month, now.day),
+      firstDate: DateTime(1920),
+      lastDate: now,
+    );
+    if (picked != null && mounted) {
+      setState(() => _selectedDate = picked);
+    }
+  }
+
+  Future<void> _pickImage() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 1080,
+      imageQuality: 85,
+    );
+    if (picked == null || !mounted) return;
+    if (kIsWeb) {
+      final bytes = await picked.readAsBytes();
+      if (mounted) setState(() => _profileImage = bytes);
+    } else {
+      setState(() => _profileImage = File(picked.path));
+    }
+  }
+
+  Future<void> _signUp() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (_selectedDate == null) {
+      _showSnack('กรุณาเลือกวันเกิด', error: true);
       return;
     }
-    if (newPassword != confirmPassword) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('กรุณากรอกรหัสผ่านให้ตรงกัน')),
-      );
-      return;
-    }
+
+    final email = _emailController.text.trim();
+    final username = _usernameController.text.trim();
+
+    setState(() => _isLoading = true);
     try {
-      final userId = await DBHelper.signIn(email, newPassword, username, firstName, lastName, dateTime, profileImage);
-      if (userId > 0) {
-        // Save user_id to SharedPreferences
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setInt('user_id', userId);
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('สมัครสมาชิกสำเร็จ')),
-        );
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const PersonalityQuizPage(),
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('สมัครสมาชิกไม่สำเร็จ')),
-        );
+      final exists =
+          await DBHelper.userExists(username: username, email: email);
+      if (!mounted) return;
+      if (exists) {
+        _showSnack('ชื่อผู้ใช้หรืออีเมลนี้ถูกใช้แล้ว', error: true);
         return;
       }
-    } catch (e) {
-      print("Sign-in error: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('เกิดข้อผิดพลาดในการสมัครสมาชิก')),
+
+      final imagePath = _profileImage is File
+          ? (_profileImage as File).path
+          : '';
+
+      final userId = await DBHelper.signIn(
+        email,
+        _passwordController.text,
+        username,
+        _firstNameController.text.trim(),
+        _lastNameController.text.trim(),
+        _selectedDate!.toIso8601String(),
+        imagePath,
       );
-    }
-  }
 
-  // Function to show the DatePicker
-  void _selectDate(BuildContext context) async {
-    final DateTime? pickedDate = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime(1900),
-      lastDate: DateTime.now(),
-    );
-    if (pickedDate != null && pickedDate != _selectedDate) {
-      setState(() {
-        _selectedDate = pickedDate;
-      });
-    }
-  }
-
-  // Function to pick an image
-  Future<void> _pickImage() async {
-    final ImagePicker picker = ImagePicker();
-    final XFile? pickedFile = await picker.pickImage(
-      source: ImageSource.gallery,
-    );
-
-    if (pickedFile != null) {
-      if (kIsWeb) {
-        final bytes = await pickedFile.readAsBytes();
-        setState(() {
-          _profileImage = bytes;
-        });
-      } else {
-        setState(() {
-          _profileImage = File(pickedFile.path);
-        });
+      if (!mounted) return;
+      if (userId <= 0) {
+        _showSnack('สมัครสมาชิกไม่สำเร็จ', error: true);
+        return;
       }
+
+      await SessionManager.saveUserId(userId);
+      if (!mounted) return;
+      _showSnack('สมัครสมาชิกสำเร็จ');
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const PersonalityQuizPage()),
+      );
+    } catch (e, st) {
+      AppLogger.error('Sign-up failed', e, st);
+      _showSnack('เกิดข้อผิดพลาดในการสมัครสมาชิก', error: true);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
-
-  // Function to validate the form
-//   void _validateAndSubmit() {
-//     if (_emailController.text.isEmpty ||
-//         _passwordController.text.isEmpty ||
-//         _usernameController.text.isEmpty ||
-//         _firstNameController.text.isEmpty ||
-//         _lastNameController.text.isEmpty ||
-//         _selectedDate == null ||
-//         _profileImage == null) {
-//       ScaffoldMessenger.of(context).showSnackBar(
-//         const SnackBar(
-//           content: Text('กรุณากรอกข้อมูลให้ครบทุกช่อง'),
-//           backgroundColor: Colors.red,
-//         ),
-//       );
-//     } else {
-//        Navigator.push(
-//       context,
-//       MaterialPageRoute(
-//         builder: (context) => const PersonalityQuizPage(),
-//       ),
-//     );
-//   }
-// }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF26A69A),
-        elevation: 0,
-        title: const Text(
-          'Sign-up',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
+        title: const Text('สมัครสมาชิก'),
         centerTitle: true,
       ),
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF00897B), Color(0xFF26A69A)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: Center(
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Profile Picture
-                    Center(
-                      child: GestureDetector(
-                        onTap: _pickImage,
-                        child: CircleAvatar(
-                          radius: 50,
-                          backgroundColor: const Color(0xFFBDBDBD),
-                          backgroundImage: _profileImage != null
-                              ? (kIsWeb
-                                  ? MemoryImage(_profileImage as Uint8List)
-                                  : FileImage(_profileImage as File)) as ImageProvider
-                              : null,
-                          child: _profileImage == null
-                              ? const Icon(
-                                  Icons.camera_alt,
-                                  size: 30,
-                                  color: Colors.white,
-                                )
-                              : null,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-
-                    // Input Fields
-                    _buildTextField('อีเมล', _emailController, Icons.email),
-                    const SizedBox(height: 16),
-                    _buildTextField('รหัสผ่าน', _passwordController, Icons.lock, obscureText: true),
-                    const SizedBox(height: 16),
-                    _buildTextField('ยืนยันรหัสผ่าน', _comfirmPasswordController, Icons.lock, obscureText: true),
-                    const SizedBox(height: 16),
-                    _buildTextField('ชื่อผู้ใช้', _usernameController, Icons.person),
-                    const SizedBox(height: 16),
-                    _buildTextField('ชื่อ', _firstNameController, Icons.text_fields),
-                    const SizedBox(height: 16),
-                    _buildTextField('นามสกุล', _lastNameController, Icons.text_fields),
-                    const SizedBox(height: 16),
-
-                    // Birthday Picker
-                    GestureDetector(
-                      onTap: () => _selectDate(context),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF5F5F5),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.grey.shade300),
-                        ),
-                        child: Text(
-                          _selectedDate == null
-                              ? 'กรุณาเลือกวันเกิด'
-                              : '${_selectedDate!.day}/${_selectedDate!.month}/${_selectedDate!.year}',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            color: Colors.black54,
+        decoration: const BoxDecoration(gradient: AppColors.primaryGradient),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: Container(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            decoration: AppDecorations.card(),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: GestureDetector(
+                      onTap: _pickImage,
+                      child: Stack(
+                        alignment: Alignment.bottomRight,
+                        children: [
+                          CircleAvatar(
+                            radius: 50,
+                            backgroundColor: const Color(0xFFE0E0E0),
+                            backgroundImage: _profileImage != null
+                                ? (kIsWeb
+                                        ? MemoryImage(_profileImage as Uint8List)
+                                        : FileImage(_profileImage as File))
+                                    as ImageProvider
+                                : null,
+                            child: _profileImage == null
+                                ? const Icon(
+                                    Icons.person,
+                                    size: 40,
+                                    color: Colors.white,
+                                  )
+                                : null,
                           ),
-                        ),
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: const BoxDecoration(
+                              color: AppColors.primary,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.camera_alt,
+                              size: 16,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 24),
-
-                    // Sign-up Button
-                    ElevatedButton(
-                      onPressed: _sign_in,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF26A69A),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  _textField(
+                    controller: _emailController,
+                    label: 'อีเมล',
+                    icon: Icons.email_outlined,
+                    keyboardType: TextInputType.emailAddress,
+                    validator: InputValidator.validateEmail,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  _textField(
+                    controller: _usernameController,
+                    label: 'ชื่อผู้ใช้',
+                    icon: Icons.alternate_email,
+                    validator: InputValidator.validateUsername,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _textField(
+                          controller: _firstNameController,
+                          label: 'ชื่อ',
+                          icon: Icons.badge_outlined,
+                          validator: (v) =>
+                              InputValidator.validateName(v, field: 'ชื่อ'),
                         ),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
-                      child: const Text(
-                        'ลงทะเบียน',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: _textField(
+                          controller: _lastNameController,
+                          label: 'นามสกุล',
+                          icon: Icons.person_outline,
+                          validator: (v) =>
+                              InputValidator.validateName(v, field: 'นามสกุล'),
                         ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  _textField(
+                    controller: _passwordController,
+                    label: 'รหัสผ่าน',
+                    icon: Icons.lock_outline,
+                    obscureText: _obscurePassword,
+                    suffix: IconButton(
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                      ),
+                      onPressed: () =>
+                          setState(() => _obscurePassword = !_obscurePassword),
+                    ),
+                    validator: InputValidator.validatePassword,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  _textField(
+                    controller: _confirmPasswordController,
+                    label: 'ยืนยันรหัสผ่าน',
+                    icon: Icons.lock_outline,
+                    obscureText: _obscureConfirm,
+                    suffix: IconButton(
+                      icon: Icon(
+                        _obscureConfirm
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                      ),
+                      onPressed: () =>
+                          setState(() => _obscureConfirm = !_obscureConfirm),
+                    ),
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return 'กรุณายืนยันรหัสผ่าน';
+                      if (v != _passwordController.text) {
+                        return 'รหัสผ่านไม่ตรงกัน';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  InkWell(
+                    onTap: _selectDate,
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 14,
+                        horizontal: 16,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF5F5F5),
+                        borderRadius: BorderRadius.circular(AppRadius.md),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.cake_outlined,
+                            color: AppColors.textSecondary,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            _selectedDate == null
+                                ? 'เลือกวันเกิด'
+                                : '${_selectedDate!.day}/${_selectedDate!.month}/${_selectedDate!.year}',
+                            style: TextStyle(
+                              color: _selectedDate == null
+                                  ? AppColors.textHint
+                                  : AppColors.textPrimary,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  ElevatedButton(
+                    onPressed: _isLoading ? null : _signUp,
+                    child: _isLoading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Text('ลงทะเบียน'),
+                  ),
+                ],
               ),
             ),
           ),
@@ -278,28 +333,24 @@ class _SignInScreenState extends State<SignInScreen> {
     );
   }
 
-  // Helper method to build text fields
-  Widget _buildTextField(
-    String label,
-    TextEditingController controller,
-    IconData icon, {
+  Widget _textField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
     bool obscureText = false,
+    TextInputType keyboardType = TextInputType.text,
+    Widget? suffix,
+    String? Function(String?)? validator,
   }) {
-    return TextField(
+    return TextFormField(
       controller: controller,
       obscureText: obscureText,
-      style: const TextStyle(fontSize: 14),
+      keyboardType: keyboardType,
+      validator: validator,
       decoration: InputDecoration(
-        prefixIcon: Icon(icon, color: Colors.grey),
-        hintText: 'กรุณาใส่ $label',
-        hintStyle: const TextStyle(color: Colors.black54),
-        filled: true,
-        fillColor: const Color(0xFFF5F5F5),
-        contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
+        labelText: label,
+        prefixIcon: Icon(icon),
+        suffixIcon: suffix,
       ),
     );
   }

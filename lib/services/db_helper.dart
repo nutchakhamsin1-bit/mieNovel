@@ -1,5 +1,7 @@
 import 'package:mie_project/data/data_scripts.dart';
 import 'package:mie_project/models/novel.dart';
+import 'package:mie_project/utils/app_logger.dart';
+import 'package:mie_project/utils/security.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
@@ -28,7 +30,7 @@ class DBHelper {
 
     _db = await openDatabase(
       path,
-      version: 2,
+      version: 4,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -195,11 +197,48 @@ class DBHelper {
             FOREIGN KEY(novel_id) REFERENCES Novels(novel_id)
           )
         ''');
+
+        // ---------------------- CHAPTER VIEWS ----------------------
+        await db.execute('''
+          CREATE TABLE ChapterViews(
+            view_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            novel_id INTEGER,
+            chapter_id INTEGER,
+            progress REAL DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES Users(user_id),
+            FOREIGN KEY(novel_id) REFERENCES Novels(novel_id),
+            FOREIGN KEY(chapter_id) REFERENCES Chapters(chapter_id)
+          )
+        ''');
+
+        await _createIndexes(db);
         await _insertInitialDataIfEmpty(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
-        // Re-seed missing data when upgrading from an older DB version
-        print('🔄 DB upgrade from v$oldVersion to v$newVersion — checking seed data...');
+        AppLogger.info('DB upgrade from v$oldVersion to v$newVersion');
+        if (oldVersion < 3) {
+          // Add ChapterViews table for v3
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS ChapterViews(
+              view_id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER,
+              novel_id INTEGER,
+              chapter_id INTEGER,
+              progress REAL DEFAULT 0,
+              created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY(user_id) REFERENCES Users(user_id),
+              FOREIGN KEY(novel_id) REFERENCES Novels(novel_id),
+              FOREIGN KEY(chapter_id) REFERENCES Chapters(chapter_id)
+            )
+          ''');
+          await _createIndexes(db);
+        }
+        if (oldVersion < 4) {
+          // v4: top-up นิยายเรื่อง 21-50 (และตอนของมัน)
+          await _topUpNovels(db);
+        }
         await _insertInitialDataIfEmpty(db);
       },
       onOpen: (db) async {
@@ -209,6 +248,139 @@ class DBHelper {
     );
 
     return _db!;
+  }
+
+  // ---------------------- INDEXES ----------------------
+  static Future<void> _createIndexes(Database db) async {
+    const statements = [
+      'CREATE INDEX IF NOT EXISTS idx_novels_user_id ON Novels(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_novels_category_id ON Novels(category_id)',
+      'CREATE INDEX IF NOT EXISTS idx_novels_secondary_category ON Novels(secondary_category_id)',
+      'CREATE INDEX IF NOT EXISTS idx_novels_published ON Novels(is_published, is_banned)',
+      'CREATE INDEX IF NOT EXISTS idx_novels_last_updated ON Novels(last_updated DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_chapters_novel_id ON Chapters(novel_id)',
+      'CREATE INDEX IF NOT EXISTS idx_chapters_novel_number ON Chapters(novel_id, chapter_number)',
+      'CREATE INDEX IF NOT EXISTS idx_chapterlikes_user_chapter ON ChapterLikes(user_id, chapter_id)',
+      'CREATE INDEX IF NOT EXISTS idx_chapterviews_user_chapter ON ChapterViews(user_id, chapter_id)',
+      'CREATE INDEX IF NOT EXISTS idx_chapterviews_novel ON ChapterViews(novel_id)',
+      'CREATE INDEX IF NOT EXISTS idx_comments_chapter ON Comments(chapter_id, is_deleted)',
+      'CREATE INDEX IF NOT EXISTS idx_commentlikes_user_comment ON CommentLikes(user_id, comment_id)',
+      'CREATE INDEX IF NOT EXISTS idx_favorites_user ON Favorites(user_id, is_active)',
+      'CREATE INDEX IF NOT EXISTS idx_reports_status ON Reports(status)',
+      'CREATE INDEX IF NOT EXISTS idx_notifications_user ON Notifications(user_id, is_read)',
+      'CREATE INDEX IF NOT EXISTS idx_users_email ON Users(email)',
+      'CREATE INDEX IF NOT EXISTS idx_users_username ON Users(username)',
+    ];
+    for (final sql in statements) {
+      try {
+        await db.execute(sql);
+      } catch (e) {
+        AppLogger.warn('Failed to create index: $sql — $e');
+      }
+    }
+  }
+
+  /// บันทึก event ว่าผู้ใช้เปิดอ่านบทไหน เวลาไหน (ใช้สำหรับ analytics + recommendation)
+  static Future<void> logChapterView({
+    required int chapterId,
+    int? userId,
+    double progress = 0,
+  }) async {
+    final db = await initDb();
+    int? novelId;
+    final ch = await db.query(
+      'Chapters',
+      columns: ['novel_id'],
+      where: 'chapter_id = ?',
+      whereArgs: [chapterId],
+      limit: 1,
+    );
+    if (ch.isNotEmpty) {
+      novelId = ch.first['novel_id'] as int?;
+    }
+
+    await db.insert('ChapterViews', {
+      'user_id': userId,
+      'novel_id': novelId,
+      'chapter_id': chapterId,
+      'progress': progress,
+      'created_at': DateTime.now().toIso8601String(),
+    });
+  }
+
+  /// Top-up นิยายที่ขาดจาก kInitialNovelsList (ใช้ตอน migrate v3→v4).
+  /// แทรกเฉพาะ novel_id ที่ยังไม่มีในตาราง — ไม่ทับของเดิมที่ผู้ใช้แต่งเอง
+  /// แล้ว insert chapter ที่ขาดให้ครบ
+  static Future<void> _topUpNovels(Database db) async {
+    AppLogger.info('Top-up novels: scanning missing entries...');
+    try {
+      final existing = await db.query('Novels', columns: ['novel_id']);
+      final existingIds = existing.map((r) => r['novel_id'] as int).toSet();
+
+      // 1) แทรกเฉพาะ Novels ที่ขาด
+      int novelsAdded = 0;
+      for (int i = 0; i < kInitialNovelsList.length; i++) {
+        final novel = Map<String, dynamic>.from(kInitialNovelsList[i]);
+        final id = novel['novel_id'] as int;
+        if (existingIds.contains(id)) continue;
+
+        // คัดลอกรูปปกตาม index ของเรื่อง (ใช้ filename เดิม — ถ้ามีอยู่แล้วจะเขียนทับ ไม่ duplicate)
+        if (i < kNovelAssetPaths.length) {
+          final assetPath = kNovelAssetPaths[i];
+          final fileName = assetPath.split('/').last;
+          novel['cover_image'] = await copyAssetToFile(assetPath, fileName);
+        }
+        await db.insert('Novels', novel,
+            conflictAlgorithm: ConflictAlgorithm.ignore);
+        novelsAdded++;
+      }
+      AppLogger.info('Top-up: added $novelsAdded new novels');
+
+      // 2) แทรกเฉพาะ Chapters ที่ขาด — รัน kInsertChapters ทั้งก้อนแต่ ignore conflict
+      //    เพราะ chapter_id ใน data_scripts กำหนดมาคงที่
+      final existingChapters = await db.query(
+        'Chapters',
+        columns: ['chapter_id'],
+      );
+      final existingChapterIds =
+          existingChapters.map((r) => r['chapter_id'] as int).toSet();
+
+      // Re-parse kInsertChapters via simple SQL replace (เปลี่ยน INSERT → INSERT OR IGNORE)
+      final safeChaptersSql = kInsertChapters.replaceFirst(
+        'INSERT INTO Chapters',
+        'INSERT OR IGNORE INTO Chapters',
+      );
+      await db.execute(safeChaptersSql);
+
+      final afterChapters = await db.query('Chapters', columns: ['chapter_id']);
+      final added = afterChapters.length - existingChapterIds.length;
+      AppLogger.info('Top-up: added $added new chapters');
+    } catch (e, st) {
+      AppLogger.error('Top-up failed', e, st);
+    }
+  }
+
+  /// ดึงประวัติการอ่านล่าสุดของผู้ใช้
+  static Future<List<Map<String, dynamic>>> getRecentReadHistory(
+    int userId, {
+    int limit = 10,
+  }) async {
+    final db = await initDb();
+    return await db.rawQuery(
+      '''
+      SELECT cv.chapter_id, cv.novel_id, MAX(cv.created_at) AS last_read,
+             n.title AS novel_title, n.cover_image, n.writer_name,
+             c.title AS chapter_title, c.chapter_number
+      FROM ChapterViews cv
+      LEFT JOIN Novels n ON cv.novel_id = n.novel_id
+      LEFT JOIN Chapters c ON cv.chapter_id = c.chapter_id
+      WHERE cv.user_id = ?
+      GROUP BY cv.novel_id
+      ORDER BY last_read DESC
+      LIMIT ?
+      ''',
+      [userId, limit],
+    );
   }
 
   // ฟังก์ชันคัดลอก Asset ไปเป็น File
@@ -365,9 +537,12 @@ class DBHelper {
     bool isWriter = false,
   }) async {
     final db = await initDb();
+    final hashed = PasswordHasher.isHashed(password)
+        ? password
+        : PasswordHasher.hash(password);
     return await db.insert('Users', {
       'username': username,
-      'password': password,
+      'password': hashed,
       'birthdate': birthdate,
       'email': email,
       'name': name ?? '',
@@ -440,24 +615,38 @@ class DBHelper {
     return await db.delete('Users', where: 'user_id = ?', whereArgs: [id]);
   }
 
-  // User login
+  // User login (accepts username OR email)
   static Future<Map<String, dynamic>?> loginUser(
-    String username,
+    String usernameOrEmail,
     String password,
   ) async {
     final db = await initDb();
+    final identifier = usernameOrEmail.trim();
     final result = await db.query(
       'Users',
-      where: 'username = ? AND password = ?',
-      whereArgs: [username, password],
+      where: 'username = ? OR email = ?',
+      whereArgs: [identifier, identifier],
+      limit: 1,
     );
 
-    if (result.isNotEmpty) {
-      print('👤 Logged in user: ${result.first}');
-      return result.first;
-    } else {
+    if (result.isEmpty) return null;
+    final user = result.first;
+    final stored = user['password'] as String?;
+    if (!PasswordHasher.verify(password, stored)) {
       return null;
     }
+
+    // If stored as plain text (legacy data), upgrade to hash transparently.
+    if (!PasswordHasher.isHashed(stored)) {
+      await db.update(
+        'Users',
+        {'password': PasswordHasher.hash(password)},
+        where: 'user_id = ?',
+        whereArgs: [user['user_id']],
+      );
+    }
+    AppLogger.info('User logged in: ${user['username']}');
+    return user;
   }
 
   // forget password
@@ -465,9 +654,9 @@ class DBHelper {
     final db = await initDb();
     return await db.update(
       'Users',
-      {'password': newPassword},
+      {'password': PasswordHasher.hash(newPassword)},
       where: 'email = ?',
-      whereArgs: [email],
+      whereArgs: [email.trim()],
     );
   }
 
@@ -483,14 +672,41 @@ class DBHelper {
   ) async {
     final db = await initDb();
     return await db.insert('Users', {
-      'email': email,
-      'password': password,
-      'username': userName,
-      'name': firstName,
-      'surname': lastName,
+      'email': email.trim(),
+      'password': PasswordHasher.hash(password),
+      'username': userName.trim(),
+      'name': firstName.trim(),
+      'surname': lastName.trim(),
       'birthdate': dateTime,
       'avatar_image': _profileImage,
     });
+  }
+
+  /// Check if username or email already exists (for sign-up validation).
+  static Future<bool> userExists({String? username, String? email}) async {
+    final db = await initDb();
+    if ((username == null || username.isEmpty) &&
+        (email == null || email.isEmpty)) {
+      return false;
+    }
+    final clauses = <String>[];
+    final args = <Object?>[];
+    if (username != null && username.isNotEmpty) {
+      clauses.add('username = ?');
+      args.add(username.trim());
+    }
+    if (email != null && email.isNotEmpty) {
+      clauses.add('email = ?');
+      args.add(email.trim());
+    }
+    final result = await db.query(
+      'Users',
+      columns: ['user_id'],
+      where: clauses.join(' OR '),
+      whereArgs: args,
+      limit: 1,
+    );
+    return result.isNotEmpty;
   }
 
   // Get user by ID
@@ -516,10 +732,34 @@ class DBHelper {
     final db = await initDb();
     final res = await db.query(
       'Admins',
-      where: 'username = ? AND password = ?',
-      whereArgs: [username, password],
+      where: 'username = ?',
+      whereArgs: [username.trim()],
+      limit: 1,
     );
-    return res.isNotEmpty ? res.first : null;
+    if (res.isEmpty) return null;
+    final admin = res.first;
+    final stored = admin['password'] as String?;
+    if (!PasswordHasher.verify(password, stored)) return null;
+
+    if (!PasswordHasher.isHashed(stored)) {
+      await db.update(
+        'Admins',
+        {'password': PasswordHasher.hash(password)},
+        where: 'admin_id = ?',
+        whereArgs: [admin['admin_id']],
+      );
+    }
+    return admin;
+  }
+
+  static Future<int> resetUserPasswordById(int userId, String newPass) async {
+    final db = await initDb();
+    return await db.update(
+      'Users',
+      {'password': PasswordHasher.hash(newPass)},
+      where: 'user_id = ?',
+      whereArgs: [userId],
+    );
   }
 
   // ---------------------- CRUD: CATEGORIES ----------------------
@@ -1416,7 +1656,7 @@ class DBHelper {
     return await db.rawQuery('''
     SELECT r.report_id, r.remark, r.created_at, r.status,
            u.username,
-           c.chapter_title
+           c.title AS chapter_title
     FROM Reports r
     LEFT JOIN Users u ON r.user_id = u.user_id
     LEFT JOIN Chapters c ON r.chapter_id = c.chapter_id
@@ -1840,7 +2080,7 @@ class DBHelper {
     final db = await database();
     await db.update(
       "Users",
-      {"password": newPass},
+      {"password": PasswordHasher.hash(newPass)},
       where: "user_id = ?",
       whereArgs: [userId],
     );

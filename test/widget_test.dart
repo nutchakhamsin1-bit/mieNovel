@@ -1,30 +1,64 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:mie_project/main.dart';
+import 'package:mie_project/theme/app_theme.dart';
+import 'package:mie_project/utils/security.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  group('PasswordHasher', () {
+    test('hash + verify roundtrip works', () {
+      final hashed = PasswordHasher.hash('correctHorseBattery42');
+      expect(PasswordHasher.verify('correctHorseBattery42', hashed), isTrue);
+      expect(PasswordHasher.verify('wrong', hashed), isFalse);
+    });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    test('hash is salted (two hashes of same password differ)', () {
+      final a = PasswordHasher.hash('same-password');
+      final b = PasswordHasher.hash('same-password');
+      expect(a, isNot(equals(b)));
+    });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    test('isHashed detects raw vs hashed strings', () {
+      expect(PasswordHasher.isHashed('hello'), isFalse);
+      expect(PasswordHasher.isHashed(PasswordHasher.hash('hi')), isTrue);
+    });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    test('verify falls back to equality for legacy plain-text values', () {
+      expect(PasswordHasher.verify('legacy', 'legacy'), isTrue);
+      expect(PasswordHasher.verify('legacy', 'other'), isFalse);
+    });
+  });
+
+  group('InputValidator', () {
+    test('rejects bad emails', () {
+      expect(InputValidator.validateEmail(''), isNotNull);
+      expect(InputValidator.validateEmail('not-an-email'), isNotNull);
+      expect(InputValidator.validateEmail('ok@example.com'), isNull);
+    });
+
+    test('rejects short or wrong usernames', () {
+      expect(InputValidator.validateUsername('a'), isNotNull);
+      expect(InputValidator.validateUsername('hi user'), isNotNull);
+      expect(InputValidator.validateUsername('ok_user.1'), isNull);
+    });
+
+    test('rejects short passwords', () {
+      expect(InputValidator.validatePassword('abc'), isNotNull);
+      expect(InputValidator.validatePassword('abcdef'), isNull);
+    });
+  });
+
+  testWidgets('AppTheme renders without errors', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: Scaffold(
+          appBar: AppBar(title: const Text('Mie Novel')),
+          body: const Center(child: Text('Hello')),
+        ),
+      ),
+    );
+    expect(find.text('Mie Novel'), findsOneWidget);
+    expect(find.text('Hello'), findsOneWidget);
   });
 }

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:mie_project/screen/home.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -513,7 +513,7 @@ class _WriteNovelScreenState extends State<WriteNovelScreen>
                     const BorderRadius.vertical(bottom: Radius.circular(20)),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
+                    color: Colors.black.withValues(alpha: 0.05),
                     offset: const Offset(0, 2),
                     blurRadius: 4,
                   ),
@@ -540,7 +540,7 @@ class _WriteNovelScreenState extends State<WriteNovelScreen>
                     padding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF26A69A).withOpacity(0.1),
+                      color: const Color(0xFF26A69A).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Row(
@@ -571,7 +571,7 @@ class _WriteNovelScreenState extends State<WriteNovelScreen>
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
+                      color: Colors.black.withValues(alpha: 0.1),
                       offset: const Offset(0, 2),
                       blurRadius: 8,
                     ),

@@ -1,4 +1,4 @@
-import 'package:mie_project/services/image_helper.dart';
+﻿import 'package:mie_project/services/image_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -231,7 +231,7 @@ class _ChapterListScreenState extends State<ChapterListScreen> {
                 color: const Color(0xFF26A69A),
               ),
             ),
-            backgroundColor: const Color(0xFF26A69A).withOpacity(0.1),
+            backgroundColor: const Color(0xFF26A69A).withValues(alpha: 0.1),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
               side: BorderSide.none,

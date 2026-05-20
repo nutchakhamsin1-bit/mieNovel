@@ -25,6 +25,6 @@ Widget buildCoverImage(
     fit: fit,
     color: color,
     colorBlendMode: colorBlendMode,
-    errorBuilder: errorBuilder ?? (_, __, ___) => fallback,
+    errorBuilder: errorBuilder ?? (_, _, _) => fallback,
   );
 }

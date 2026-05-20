@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:mie_project/screen/login.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:mie_project/admin/adminhomepage.dart';
+import 'package:mie_project/screen/home.dart';
+import 'package:mie_project/screen/login.dart';
+import 'package:mie_project/services/db_helper.dart';
+import 'package:mie_project/theme/app_theme.dart';
+import 'package:mie_project/utils/app_logger.dart';
+import 'package:mie_project/utils/session_manager.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -9,173 +15,167 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _fadeAnimation;
-  late Animation<double> _scaleAnimation;
-  late Animation<double> _fadeInTagline;
-  late Animation<double> _slideAnimation;
-  late Animation<double> _rotateAnimation;
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _fade;
+  late final Animation<double> _scale;
+  late final Animation<double> _tagSlide;
+  late final Animation<double> _tagFade;
 
   @override
   void initState() {
     super.initState();
-
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 2500),
+      duration: const Duration(milliseconds: 1800),
       vsync: this,
     );
-
-    // Enhanced fade animation with smoother curve
-    _fadeAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
+    _fade = CurvedAnimation(
       parent: _controller,
-      curve: const Interval(0.0, 0.6, curve: Curves.easeInOutCubic),
-    ));
-
-    // Improved scale animation with bounce effect
-    _scaleAnimation = Tween<double>(
-      begin: 0.2,
-      end: 1.0,
-    ).animate(CurvedAnimation(
+      curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
+    );
+    _scale = Tween<double>(begin: 0.85, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.0, 0.6, curve: Curves.easeOutBack),
+      ),
+    );
+    _tagSlide = Tween<double>(begin: 24, end: 0).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.5, 1.0, curve: Curves.easeOut),
+      ),
+    );
+    _tagFade = CurvedAnimation(
       parent: _controller,
-      curve: const Interval(0.0, 0.6, curve: Curves.elasticOut),
-    ));
-
-    // Added rotation animation
-    _rotateAnimation = Tween<double>(
-      begin: -0.2,
-      end: 0.0,
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: const Interval(0.0, 0.6, curve: Curves.easeOutBack),
-    ));
-
-    // Slide animation for tagline
-    _slideAnimation = Tween<double>(
-      begin: 50.0,
-      end: 0.0,
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: const Interval(0.6, 1.0, curve: Curves.easeOutCubic),
-    ));
-
-    // Enhanced tagline fade
-    _fadeInTagline = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: const Interval(0.6, 1.0, curve: Curves.easeIn),
-    ));
-
+      curve: const Interval(0.5, 1.0, curve: Curves.easeIn),
+    );
     _controller.forward();
+    _bootstrap();
+  }
 
-    Future.delayed(const Duration(seconds: 3), () {
-      Navigator.pushReplacement(
-        context,
-        PageRouteBuilder(
-          pageBuilder: (context, animation, secondaryAnimation) => const LogRegis(),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            return FadeTransition(opacity: animation, child: child);
-          },
-          transitionDuration: const Duration(milliseconds: 800),
-        ),
-      );
-    });
+  Future<void> _bootstrap() async {
+    final minSplashDuration = Future.delayed(const Duration(milliseconds: 1400));
+    Widget destination = const LogRegis();
+    try {
+      await DBHelper.initDb();
+      final adminId = await SessionManager.getAdminId();
+      if (adminId != null) {
+        destination = const Adminhomepage();
+      } else {
+        final userId = await SessionManager.getUserId();
+        if (userId != null) {
+          final user = await DBHelper.getUserById(userId);
+          if (user != null && user['status'] == 'active') {
+            destination = const HomeScreen();
+          } else {
+            await SessionManager.clear();
+          }
+        }
+      }
+    } catch (e, st) {
+      AppLogger.error('Splash bootstrap failed', e, st);
+    }
+
+    await minSplashDuration;
+    if (!mounted) return;
+
+    Navigator.pushReplacement(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (_, _, _) => destination,
+        transitionDuration: const Duration(milliseconds: 600),
+        transitionsBuilder: (_, anim, _, child) =>
+            FadeTransition(opacity: anim, child: child),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              const Color(0xFF00897B),
-              const Color(0xFF26A69A),
-              const Color(0xFF26A69A).withOpacity(0.8),
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            stops: const [0.0, 0.5, 1.0],
-          ),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Enhanced Animated Logo
-              AnimatedBuilder(
-                animation: _controller,
-                builder: (context, child) {
-                  return Transform(
-                    transform: Matrix4.identity()
-                      ..setEntry(3, 2, 0.001)
-                      ..rotateZ(_rotateAnimation.value)
-                      ..scale(_scaleAnimation.value),
-                    alignment: Alignment.center,
-                    child: Opacity(
-                      opacity: _fadeAnimation.value,
-                      child: child,
+        decoration: const BoxDecoration(gradient: AppColors.primaryGradient),
+        child: SafeArea(
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                FadeTransition(
+                  opacity: _fade,
+                  child: ScaleTransition(
+                    scale: _scale,
+                    child: Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.12),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.menu_book_rounded,
+                        color: Colors.white,
+                        size: 64,
+                      ),
                     ),
-                  );
-                },
-                child: Text(
-                  'mie novel',
-                  style: GoogleFonts.pacifico(
-                    fontSize: 76,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    letterSpacing: 1.5,
-                    shadows: [
-                      Shadow(
-                        color: Colors.black.withOpacity(0.15),
-                        offset: const Offset(0, 4),
-                        blurRadius: 12,
-                      ),
-                      Shadow(
-                        color: Colors.black.withOpacity(0.1),
-                        offset: const Offset(0, 8),
-                        blurRadius: 16,
-                      ),
-                    ],
                   ),
                 ),
-              ),
-              const SizedBox(height: 24),
-              // Enhanced Animated Tagline
-              AnimatedBuilder(
-                animation: _controller,
-                builder: (context, child) {
-                  return Transform.translate(
-                    offset: Offset(0, _slideAnimation.value),
-                    child: Opacity(
-                      opacity: _fadeInTagline.value,
-                      child: child,
+                const SizedBox(height: 24),
+                FadeTransition(
+                  opacity: _fade,
+                  child: Text(
+                    'mie novel',
+                    style: GoogleFonts.pacifico(
+                      fontSize: 60,
+                      color: Colors.white,
+                      letterSpacing: 1.2,
+                      shadows: [
+                        Shadow(
+                          color: Colors.black.withValues(alpha: 0.15),
+                          offset: const Offset(0, 4),
+                          blurRadius: 12,
+                        ),
+                      ],
                     ),
-                  );
-                },
-                child: Text(
-                  'Your eyes begin the journey.',
-                  style: GoogleFonts.prompt(
-                    color: Colors.white,
-                    fontSize: 18,
-                    letterSpacing: 0.8,
-                    fontWeight: FontWeight.w300,
-                    shadows: [
-                      Shadow(
-                        color: Colors.black.withOpacity(0.2),
-                        offset: const Offset(0, 2),
-                        blurRadius: 4,
-                      ),
-                    ],
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+                AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, child) {
+                    return Transform.translate(
+                      offset: Offset(0, _tagSlide.value),
+                      child: Opacity(opacity: _tagFade.value, child: child),
+                    );
+                  },
+                  child: Text(
+                    'Your eyes begin the journey.',
+                    style: GoogleFonts.prompt(
+                      color: Colors.white.withValues(alpha: 0.9),
+                      fontSize: 16,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 56),
+                FadeTransition(
+                  opacity: _tagFade,
+                  child: const SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      valueColor: AlwaysStoppedAnimation(Colors.white70),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

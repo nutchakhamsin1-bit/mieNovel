@@ -1,224 +1,312 @@
+import 'dart:math' as math;
+
 import 'package:mie_project/services/db_helper.dart';
+import 'package:mie_project/utils/app_logger.dart';
 
+/// Provides reading-behavior insights for a user and content analytics for a
+/// novel. All queries target tables that actually exist (ChapterViews,
+/// Chapters, Novels, Categories, Favorites) and avoid SQLite-incompatible
+/// functions like STDDEV.
 class NovelAnalysisService {
-  // คะแนนการวิเคราะห์นิยาย
-  static const double CATEGORY_WEIGHT = 0.3;
-  static const double READ_TIME_WEIGHT = 0.2;
-  static const double COMPLETION_RATE_WEIGHT = 0.15;
-  static const double LIKE_RATIO_WEIGHT = 0.15;
-  static const double TREND_WEIGHT = 0.1;
-  static const double AGE_GROUP_WEIGHT = 0.1;
+  static const double categoryWeight = 0.30;
+  static const double readTimeWeight = 0.20;
+  static const double completionRateWeight = 0.15;
+  static const double likeRatioWeight = 0.15;
+  static const double trendWeight = 0.10;
+  static const double ageGroupWeight = 0.10;
 
-  // วิเคราะห์พฤติกรรมการอ่านของผู้ใช้
-  static Future<Map<String, dynamic>> analyzeUserReadingBehavior(int userId) async {
+  /// Build a behavior profile for a user from their ChapterView events.
+  /// Returns sensible defaults if no history exists.
+  static Future<Map<String, dynamic>> analyzeUserReadingBehavior(
+    int userId,
+  ) async {
     final db = await DBHelper.database();
-    
-    // 1. ระยะเวลาการอ่านเฉลี่ยต่อบท
-    final readTimeResult = await db.rawQuery('''
-      SELECT AVG(reading_duration) as avg_read_time
-      FROM (
-        SELECT chapter_id, 
-               MAX(created_at) - MIN(created_at) as reading_duration
-        FROM ChapterViews
-        WHERE user_id = ?
-        GROUP BY chapter_id
-      )
-    ''', [userId]);
 
-    // 2. อัตราการอ่านจบ
-    final completionResult = await db.rawQuery('''
-      SELECT 
-        COUNT(DISTINCT CASE WHEN completion_rate >= 0.8 THEN novel_id END) as completed_novels,
-        COUNT(DISTINCT novel_id) as total_started_novels
-      FROM (
+    // 1. Average chapter length the user actually reads (proxy for read-time).
+    final lengthResult = await db.rawQuery(
+      '''
+      SELECT AVG(LENGTH(COALESCE(c.content, ''))) AS avg_length,
+             COUNT(DISTINCT cv.chapter_id) AS chapters_read
+      FROM ChapterViews cv
+      JOIN Chapters c ON c.chapter_id = cv.chapter_id
+      WHERE cv.user_id = ?
+      ''',
+      [userId],
+    );
+
+    // 2. Completion rate per novel — novels with ≥80% of chapters read.
+    final completionResult = await db.rawQuery(
+      '''
+      WITH novel_progress AS (
         SELECT n.novel_id,
-               COUNT(DISTINCT cv.chapter_id) * 1.0 / COUNT(DISTINCT c.chapter_id) as completion_rate
+               COUNT(DISTINCT c.chapter_id) AS total_chapters,
+               COUNT(DISTINCT cv.chapter_id) AS read_chapters
         FROM Novels n
-        JOIN Chapters c ON n.novel_id = c.novel_id
-        LEFT JOIN ChapterViews cv ON c.chapter_id = cv.chapter_id AND cv.user_id = ?
+        JOIN Chapters c ON c.novel_id = n.novel_id
+        LEFT JOIN ChapterViews cv
+          ON cv.chapter_id = c.chapter_id AND cv.user_id = ?
         GROUP BY n.novel_id
+        HAVING read_chapters > 0
       )
-    ''', [userId]);
+      SELECT
+        SUM(CASE WHEN read_chapters * 1.0 / total_chapters >= 0.8 THEN 1 ELSE 0 END) AS completed,
+        COUNT(*) AS started
+      FROM novel_progress
+      ''',
+      [userId],
+    );
 
-    // 3. ช่วงเวลาที่ชอบอ่าน
-    final readingTimeResult = await db.rawQuery('''
-      SELECT 
-        CASE 
-          WHEN strftime('%H', created_at) BETWEEN '06' AND '11' THEN 'morning'
-          WHEN strftime('%H', created_at) BETWEEN '12' AND '17' THEN 'afternoon'
-          WHEN strftime('%H', created_at) BETWEEN '18' AND '23' THEN 'evening'
+    // 3. Preferred time of day.
+    final timeResult = await db.rawQuery(
+      '''
+      SELECT
+        CASE
+          WHEN CAST(strftime('%H', created_at) AS INTEGER) BETWEEN 6 AND 11 THEN 'morning'
+          WHEN CAST(strftime('%H', created_at) AS INTEGER) BETWEEN 12 AND 17 THEN 'afternoon'
+          WHEN CAST(strftime('%H', created_at) AS INTEGER) BETWEEN 18 AND 22 THEN 'evening'
           ELSE 'night'
-        END as time_period,
-        COUNT(*) as read_count
+        END AS time_period,
+        COUNT(*) AS read_count
       FROM ChapterViews
       WHERE user_id = ?
       GROUP BY time_period
       ORDER BY read_count DESC
-    ''', [userId]);
+      LIMIT 1
+      ''',
+      [userId],
+    );
 
-    final _avgReadTime = (readTimeResult.first['avg_read_time'] as num?)?.toDouble() ?? 0.0;
-    final _completed = (completionResult.first['completed_novels'] as num?)?.toDouble() ?? 0.0;
-    final _totalStarted = (completionResult.first['total_started_novels'] as num?)?.toDouble() ?? 0.0;
-    final _completionRate = _totalStarted > 0.0 ? _completed / _totalStarted : 0.0;
-    final _preferredTime = readingTimeResult.isNotEmpty
-        ? (readingTimeResult.first['time_period'] as String)
+    // 4. Favorite categories aggregated from reads + favorites.
+    final categoryResult = await db.rawQuery(
+      '''
+      SELECT cat.category_id, cat.category_name, SUM(weight) AS score
+      FROM (
+        SELECT n.category_id, 1.0 AS weight
+        FROM ChapterViews cv
+        JOIN Novels n ON n.novel_id = cv.novel_id
+        WHERE cv.user_id = ?
+        UNION ALL
+        SELECT n.category_id, 2.5 AS weight
+        FROM Favorites f
+        JOIN Novels n ON n.novel_id = f.novel_id
+        WHERE f.user_id = ? AND f.is_active = 1
+      ) src
+      JOIN Categories cat ON cat.category_id = src.category_id
+      GROUP BY cat.category_id
+      ORDER BY score DESC
+      LIMIT 5
+      ''',
+      [userId, userId],
+    );
+
+    final avgLength =
+        (lengthResult.first['avg_length'] as num?)?.toDouble() ?? 0.0;
+    final chaptersRead =
+        (lengthResult.first['chapters_read'] as num?)?.toInt() ?? 0;
+    final completed = (completionResult.first['completed'] as num?)?.toInt() ?? 0;
+    final started = (completionResult.first['started'] as num?)?.toInt() ?? 0;
+    final completionRate = started > 0 ? completed / started : 0.0;
+    final preferred = timeResult.isNotEmpty
+        ? timeResult.first['time_period'] as String
         : 'any';
 
     return {
-      'avg_read_time': _avgReadTime,
-      'completion_rate': _completionRate,
-      'preferred_time': _preferredTime
+      'avg_chapter_length': avgLength,
+      'chapters_read': chaptersRead,
+      'completion_rate': completionRate,
+      'preferred_time': preferred,
+      'top_categories': categoryResult,
     };
   }
 
-  // วิเคราะห์นิยายที่เหมาะสมกับผู้ใช้
+  /// Personalised novel recommendations based on the behavior profile.
   static Future<List<Map<String, dynamic>>> getPersonalizedRecommendations(
     int userId,
-    Map<String, dynamic> userBehavior
+    Map<String, dynamic> userBehavior,
   ) async {
-    final db = await DBHelper.database();
-    
-    final readingTime = userBehavior['avg_read_time'] as double;
-    final completionRate = userBehavior['completion_rate'] as double;
-    final preferredTime = userBehavior['preferred_time'] as String;
+    try {
+      final db = await DBHelper.database();
+      final topCategories =
+          (userBehavior['top_categories'] as List<Map<String, dynamic>>?) ?? [];
 
-    // คำนวณคะแนนความเหมาะสมของแต่ละเรื่อง
-    final recommendations = await db.rawQuery('''
-      WITH NovelScores AS (
-        SELECT 
-          n.*,
-          c1.category_name as main_category,
-          c2.category_name as secondary_category,
-          -- คะแนนความนิยม
-          (n.likes * 1.0 / (n.number_of_views + 1)) as popularity_score,
-          -- คะแนนความยาวเหมาะสม
-          (1 - ABS(
-            (SELECT AVG(LENGTH(content)) FROM Chapters WHERE novel_id = n.novel_id) - ?
-          ) / (SELECT MAX(LENGTH(content)) FROM Chapters)) as length_score,
-          -- คะแนนแนวโน้ม
-          (n.likes - n.previous_likes) / (n.number_of_views - n.previous_views + 1) as trend_score
-        FROM Novels n
-        LEFT JOIN Categories c1 ON n.category_id = c1.category_id
-        LEFT JOIN Categories c2 ON n.secondary_category_id = c2.category_id
-        WHERE n.is_published = 1 AND n.is_banned = 0
-      )
-      SELECT 
-        *,
-        (
-          popularity_score * ? +
-          length_score * ? +
-          trend_score * ?
-        ) as relevance_score
-      FROM NovelScores
-      WHERE novel_id NOT IN (
-        SELECT novel_id FROM Favorites WHERE user_id = ?
-      )
-      ORDER BY relevance_score DESC
-      LIMIT 15
-    ''', [
-      readingTime,
-      LIKE_RATIO_WEIGHT,
-      READ_TIME_WEIGHT,
-      TREND_WEIGHT,
-      userId
-    ]);
+      if (topCategories.isEmpty) {
+        // Cold start — fall back to popular novels.
+        return await db.rawQuery('''
+          SELECT n.*,
+                 c1.category_name AS main_category,
+                 c2.category_name AS secondary_category,
+                 (n.likes * 1.0 / (n.number_of_views + 1)) AS popularity_score
+          FROM Novels n
+          LEFT JOIN Categories c1 ON c1.category_id = n.category_id
+          LEFT JOIN Categories c2 ON c2.category_id = n.secondary_category_id
+          WHERE n.is_published = 1 AND n.is_banned = 0
+          ORDER BY popularity_score DESC, n.number_of_views DESC
+          LIMIT 15
+        ''');
+      }
 
-    return recommendations;
+      final ids = topCategories.map((c) => c['category_id']).toList();
+      final placeholders = List.filled(ids.length, '?').join(',');
+
+      final result = await db.rawQuery(
+        '''
+        WITH NovelScores AS (
+          SELECT
+            n.*,
+            c1.category_name AS main_category,
+            c2.category_name AS secondary_category,
+            (n.likes * 1.0 / (n.number_of_views + 1)) AS popularity_score,
+            CASE
+              WHEN n.category_id IN ($placeholders) THEN 1.0
+              WHEN n.secondary_category_id IN ($placeholders) THEN 0.6
+              ELSE 0.0
+            END AS category_score
+          FROM Novels n
+          LEFT JOIN Categories c1 ON c1.category_id = n.category_id
+          LEFT JOIN Categories c2 ON c2.category_id = n.secondary_category_id
+          WHERE n.is_published = 1 AND n.is_banned = 0
+        )
+        SELECT *,
+          (category_score * ? + popularity_score * ?) AS relevance_score
+        FROM NovelScores
+        WHERE novel_id NOT IN (
+          SELECT novel_id FROM Favorites WHERE user_id = ? AND is_active = 1
+        )
+        ORDER BY relevance_score DESC, number_of_views DESC
+        LIMIT 15
+        ''',
+        [...ids, ...ids, categoryWeight, likeRatioWeight, userId],
+      );
+
+      return result;
+    } catch (e, st) {
+      AppLogger.error('getPersonalizedRecommendations failed', e, st);
+      return [];
+    }
   }
 
-  // วิเคราะห์เนื้อหาและสไตล์การเขียน
+  /// Analyse a single novel's content/update cadence.
   static Future<Map<String, dynamic>> analyzeNovelContent(int novelId) async {
     final db = await DBHelper.database();
-    
-    // 1. ความยาวเฉลี่ยต่อบท
-    final chapterLengthResult = await db.rawQuery('''
-      SELECT 
-        AVG(LENGTH(content)) as avg_length,
-        MIN(LENGTH(content)) as min_length,
-        MAX(LENGTH(content)) as max_length
+
+    // 1. Chapter length stats.
+    final lengthResult = await db.rawQuery(
+      '''
+      SELECT AVG(LENGTH(content)) AS avg_length,
+             MIN(LENGTH(content)) AS min_length,
+             MAX(LENGTH(content)) AS max_length,
+             COUNT(*) AS chapter_count
       FROM Chapters
       WHERE novel_id = ?
-    ''', [novelId]);
+      ''',
+      [novelId],
+    );
 
-    // 2. อัตราการอัพเดต
-    final updatePatternResult = await db.rawQuery('''
-      WITH ChapterDates AS (
-        SELECT 
-          created_at,
-          JULIANDAY(created_at) - JULIANDAY(LAG(created_at) OVER (ORDER BY created_at)) as days_between
+    // 2. Update cadence (uses LAG, supported in SQLite ≥ 3.25).
+    final cadenceResult = await db.rawQuery(
+      '''
+      WITH ordered AS (
+        SELECT created_at,
+               JULIANDAY(created_at) -
+               JULIANDAY(LAG(created_at) OVER (ORDER BY created_at)) AS gap_days
         FROM Chapters
         WHERE novel_id = ?
-        ORDER BY created_at
       )
-      SELECT AVG(days_between) as avg_update_interval
-      FROM ChapterDates
-      WHERE days_between IS NOT NULL
-    ''', [novelId]);
+      SELECT AVG(gap_days) AS avg_update_interval
+      FROM ordered
+      WHERE gap_days IS NOT NULL
+      ''',
+      [novelId],
+    );
 
-    // 3. ความสม่ำเสมอของคุณภาพ (วัดจาก likes/views ต่อบท)
-    final qualityConsistencyResult = await db.rawQuery('''
-      SELECT 
-        AVG(likes * 1.0 / NULLIF(number_of_views, 0)) as avg_engagement,
-        STDDEV(likes * 1.0 / NULLIF(number_of_views, 0)) as engagement_stddev
+    // 3. Engagement consistency — sample-stddev computed manually (SQLite
+    //    has no STDDEV).
+    final engagementRows = await db.rawQuery(
+      '''
+      SELECT likes * 1.0 / NULLIF(number_of_views, 0) AS rate
       FROM Chapters
       WHERE novel_id = ? AND number_of_views > 0
-    ''', [novelId]);
+      ''',
+      [novelId],
+    );
 
-    final avgLength = (chapterLengthResult.first['avg_length'] as num?)?.toDouble() ?? 0.0;
-    final minLength = (chapterLengthResult.first['min_length'] as num?)?.toDouble();
-    final maxLength = (chapterLengthResult.first['max_length'] as num?)?.toDouble();
-
-    double lengthVariance;
-    if (avgLength == 0.0 || minLength == null || maxLength == null) {
-      lengthVariance = 0.0;
-    } else {
-      lengthVariance = (maxLength - minLength) / avgLength;
+    double? engagementAvg;
+    double? engagementStd;
+    if (engagementRows.isNotEmpty) {
+      final rates = engagementRows
+          .map((r) => (r['rate'] as num?)?.toDouble() ?? 0.0)
+          .toList();
+      final mean = rates.reduce((a, b) => a + b) / rates.length;
+      final variance =
+          rates.map((r) => (r - mean) * (r - mean)).reduce((a, b) => a + b) /
+              rates.length;
+      engagementAvg = mean;
+      engagementStd = variance > 0 ? math.sqrt(variance) : 0.0;
     }
 
-    final updateInterval = (updatePatternResult.first['avg_update_interval'] as num?)?.toDouble();
+    final row = lengthResult.first;
+    final avgLength = (row['avg_length'] as num?)?.toDouble() ?? 0.0;
+    final minLength = (row['min_length'] as num?)?.toDouble();
+    final maxLength = (row['max_length'] as num?)?.toDouble();
+    final chapterCount = (row['chapter_count'] as num?)?.toInt() ?? 0;
 
-    final engagementAvg = (qualityConsistencyResult.first['avg_engagement'] as num?)?.toDouble();
-    final engagementStd = (qualityConsistencyResult.first['engagement_stddev'] as num?)?.toDouble();
-    final qualityConsistency = (engagementAvg == null || engagementAvg == 0.0 || engagementStd == null)
+    final lengthVariance = (avgLength == 0 || minLength == null || maxLength == null)
         ? 0.0
-        : engagementStd / engagementAvg;
+        : (maxLength - minLength) / avgLength;
+
+    final updateInterval =
+        (cadenceResult.first['avg_update_interval'] as num?)?.toDouble();
+
+    final qualityConsistency =
+        (engagementAvg == null || engagementAvg == 0 || engagementStd == null)
+            ? 0.0
+            : engagementStd / engagementAvg;
 
     return {
       'avg_chapter_length': avgLength,
       'length_variance': lengthVariance,
       'update_interval': updateInterval,
-      'quality_consistency': qualityConsistency
+      'quality_consistency': qualityConsistency,
+      'chapter_count': chapterCount,
     };
   }
 
-  // คำนวณความเหมาะสมกับผู้ใช้
+  /// Combine user behavior with a novel's analysis to score compatibility.
   static double calculateUserNovelCompatibility(
     Map<String, dynamic> userBehavior,
-    Map<String, dynamic> novelAnalysis
+    Map<String, dynamic> novelAnalysis,
   ) {
-    double score = 0.0;
-    
-    // 1. ความเหมาะสมด้านความยาว
-    final lengthCompatibility = 1.0 - (
-      (userBehavior['avg_read_time'] - novelAnalysis['avg_chapter_length']).abs() /
-      userBehavior['avg_read_time']
-    ).clamp(0.0, 1.0);
-    
-    // 2. ความเหมาะสมด้านการอัพเดต
-    final updateCompatibility = novelAnalysis['update_interval'] <= 7 ? 1.0 :
-                              novelAnalysis['update_interval'] <= 14 ? 0.8 :
-                              novelAnalysis['update_interval'] <= 30 ? 0.5 : 0.3;
-    
-    // 3. ความเหมาะสมด้านคุณภาพ
-    final qualityScore = novelAnalysis['quality_consistency'] <= 0.2 ? 1.0 :
-                        novelAnalysis['quality_consistency'] <= 0.4 ? 0.8 :
-                        novelAnalysis['quality_consistency'] <= 0.6 ? 0.6 : 0.4;
+    final userAvg = (userBehavior['avg_chapter_length'] as num?)?.toDouble() ?? 0.0;
+    final novelAvg =
+        (novelAnalysis['avg_chapter_length'] as num?)?.toDouble() ?? 0.0;
+    final updateInterval =
+        (novelAnalysis['update_interval'] as num?)?.toDouble() ?? 30.0;
+    final quality =
+        (novelAnalysis['quality_consistency'] as num?)?.toDouble() ?? 0.5;
 
-    // คำนวณคะแนนรวมแบบถ่วงน้ำหนัก
-    score = (lengthCompatibility * READ_TIME_WEIGHT) +
-            (updateCompatibility * COMPLETION_RATE_WEIGHT) +
-            (qualityScore * LIKE_RATIO_WEIGHT);
+    final lengthCompat = userAvg == 0
+        ? 0.5
+        : (1 - ((userAvg - novelAvg).abs() / userAvg)).clamp(0.0, 1.0);
 
-    return score;
+    final cadenceCompat = updateInterval <= 7
+        ? 1.0
+        : updateInterval <= 14
+            ? 0.8
+            : updateInterval <= 30
+                ? 0.5
+                : 0.3;
+
+    final qualityScore = quality <= 0.2
+        ? 1.0
+        : quality <= 0.4
+            ? 0.8
+            : quality <= 0.6
+                ? 0.6
+                : 0.4;
+
+    return (lengthCompat * readTimeWeight) +
+        (cadenceCompat * completionRateWeight) +
+        (qualityScore * likeRatioWeight);
   }
 }
+

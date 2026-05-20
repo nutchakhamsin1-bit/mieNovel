@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mie_project/services/db_helper.dart';
@@ -165,14 +165,14 @@ class _NotificationPageState extends State<NotificationPage> {
                     final Color iconColor = _getColorForType(type);
 
                     return Container(
-                      color: isRead ? Colors.white : Colors.lightBlue.withOpacity(0.05), // ไฮไลท์ยังไม่อ่านอ่อน ๆ
+                      color: isRead ? Colors.white : Colors.lightBlue.withValues(alpha: 0.05), // ไฮไลท์ยังไม่อ่านอ่อน ๆ
                       child: ListTile(
                         contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
                         leading: Container(
                           width: 40,
                           height: 40,
                           decoration: BoxDecoration(
-                            color: iconColor.withOpacity(0.1),
+                            color: iconColor.withValues(alpha: 0.1),
                             shape: BoxShape.circle,
                           ),
                           child: Icon(

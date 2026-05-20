@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mie_project/services/db_helper.dart';
@@ -92,8 +92,12 @@ class _ReadNovelPageState extends State<ReadNovelPage>
         final chapterId = (chapterData['chapter_id'] ?? 0) as int;
         _chapterId = chapterId;
 
-        // ✅ เพิ่มจำนวนวิว
+        // ✅ เพิ่มจำนวนวิว + บันทึก event การอ่าน
         await DBHelper.incrementChapterViews(chapterId);
+        await DBHelper.logChapterView(
+          chapterId: chapterId,
+          userId: _userId,
+        );
         final viewCount = await DBHelper.getChapterViews(chapterId);
 
         // ✅ โหลดจำนวนไลค์
@@ -107,7 +111,7 @@ class _ReadNovelPageState extends State<ReadNovelPage>
 
         setState(() {
           _chapterTitle = chapterData!['title'] ?? 'ไม่มีชื่อบท';
-          _chapterContent = chapterData!['content'] ?? 'ไม่มีเนื้อหาในบทนี้';
+          _chapterContent = chapterData['content'] ?? 'ไม่มีเนื้อหาในบทนี้';
           _viewCount = viewCount;
           _likeCount = likeCount;
           _hasLiked = userLiked;
@@ -380,7 +384,7 @@ class _ReadNovelPageState extends State<ReadNovelPage>
                         const SizedBox(height: 8),
                         Text(
                           '👁️ $_viewCount views',
-                          style: TextStyle(color: _textColor.withOpacity(0.7)),
+                          style: TextStyle(color: _textColor.withValues(alpha: 0.7)),
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 16),

@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:mie_project/screen/manage_novel_writer.dart';
-import 'package:mie_project/screen/show_chapter.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class NovelTitleScreen extends StatefulWidget {
   const NovelTitleScreen({super.key});
